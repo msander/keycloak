@@ -36,6 +36,27 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
    - Implement consistent key scheme with domain-specific prefixes (`user-session:realm:sessionId` etc.) and encode value payloads using Keycloak's existing serialization utilities when available.
    - Handle cross-data center replication by supporting Redis Cluster or Valkey multi-master setups; include configuration toggles for enabling read replicas.
 
+### SPI Mapping Catalogue
+
+| Keycloak cache / SPI | Valkey structure | Key pattern | TTL policy | Cluster scope | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `realms` / RealmCacheProvider | Hash | `realm:{realmId}` | None (revision invalidated) | Local | Realm metadata stored as structured documents and invalidated via the paired revision cache. |
+| `realmRevisions` / RealmCacheProvider | String | `realm-rev:{realmId}` | None | Local | Tracks the monotonic revision for realm cache entries so remote nodes can evict on change. |
+| `users` / UserCacheProvider | Hash | `user:{realmId}:{userId}` | None (revision invalidated) | Local | Mirrors cached user metadata; revisions drive invalidation and eliminate global TTL churn. |
+| `userRevisions` / UserCacheProvider | String | `user-rev:{realmId}:{userId}` | None | Local | Revision counter supporting cross-node invalidation of user cache entries. |
+| `authorization` / AuthorizationProvider | Hash | `authz:{realmId}:{resourceId}` | None (revision invalidated) | Local | Authorization objects cached per resource/policy and coordinated with revision entries. |
+| `authorizationRevisions` / AuthorizationProvider | String | `authz-rev:{realmId}:{resourceId}` | None | Local | Revision counter for authorization cache entries. |
+| `keys` / PublicKeyStorageProvider | Hash | `keys:{realmId}:{keyId}` | Absolute expiry (max idle) | Local | Public keys and cert chains cached with their configured lifespan for predictable rotation. |
+| `crl` / TruststoreProvider | Hash | `crl:{realmId}:{kid}` | Absolute expiry (max idle) | Local | Certificate revocation lists cached with deterministic expiry per truststore policy. |
+| `sessions` / UserSessionProvider | Hash | `user-session:{realmId}:{sessionId}` | Absolute expiry (session lifespan) | Clustered | Online user sessions replicated across the cluster with TTL aligned to session expiration. |
+| `clientSessions` / UserSessionProvider | Hash | `client-session:{realmId}:{sessionId}` | Absolute expiry (session lifespan) | Clustered | Client session records tied to user sessions and expiring in lock-step. |
+| `offlineSessions` / UserSessionProvider | Hash | `offline-user-session:{realmId}:{sessionId}` | Absolute expiry (offline lifespan) | Clustered | Offline user sessions leveraging TTL derived from offline session policies. |
+| `offlineClientSessions` / UserSessionProvider | Hash | `offline-client-session:{realmId}:{sessionId}` | Absolute expiry (offline lifespan) | Clustered | Offline client sessions using the same TTL and eviction semantics as their user counterparts. |
+| `loginFailures` / UserLoginFailureProvider | Hash | `login-failure:{realmId}:{userId}` | Absolute expiry (per realm policy) | Clustered | Failed login counters expire according to the configured wait interval for lockout recovery. |
+| `authenticationSessions` / AuthenticationSessionProvider | Hash | `auth-session:{realmId}:{rootSessionId}` | Absolute expiry (auth session lifespan) | Clustered | Root authentication sessions expire according to authentication lifespan settings. |
+| `actionTokens` / SingleUseObjectProvider | Hash + Sorted set index | `action-token:{tokenId}` | Absolute expiry (token lifespan) | Clustered | Single-use tokens stored as hash payloads with a sorted-set index to support efficient sweeps. |
+| `work` / ClusterProvider (WorkCache) | Stream | `work:{realmId}` | Client managed | Clustered | Cluster task queue implemented via Redis Streams with consumer groups for node coordination. |
+
 4. **Startup Lifecycle Integration**
    - Register providers via `META-INF/services/org.keycloak.provider.ProviderFactory` and `org.keycloak.Config.Scope` metadata.
    - On startup, initialize connection pools (Lettuce `StatefulConnection`), run health checks, and optionally perform schema bootstrap (creating Lua scripts for atomic ops).
@@ -61,7 +82,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - [x] Define dependency management for Lettuce/Valkey client and embedded test server in the module POM.
 - [ ] Draft high-level component diagram illustrating provider replacements.
 - [x] Prototype embedded Redis server bootstrapping utility for tests (no Docker/Testcontainers).
-- [ ] Flesh out SPI mapping table (which Keycloak caches map to which Redis structures) within this document.
+- [x] Flesh out SPI mapping table (which Keycloak caches map to which Redis structures) within this document.
 - [ ] Implement actual provider classes following the plan (future work), focusing next on map storage and cache replacements.
 - [x] Provide Valkey-backed DB lock provider with forced unlock support and configurable lease/retry settings.
 - [x] Extend connection subsystem with operational health reporting hooks and publish readiness diagnostics.
@@ -78,6 +99,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Evaluate deterministic seed data and concurrency scenarios to ensure session consistency during failover.
 
 ## Change Log
+- **v0.7.1-spi-mapping**: Documented the SPI-to-Valkey data structure catalogue and codified descriptors covering all clustered and local caches.
 - **v0.7.0-dblock**: Added a Valkey-backed global DB lock provider with configurable timeouts, startup forced-unlock support, and comprehensive embedded Valkey tests.
 - **v0.6.1-decouple-infinispan**: Removed the direct build dependency on `keycloak-model-infinispan`, introduced test-local protostream schema/fixtures, and documented the path toward neutral cluster-event serialization.
 - **v0.6.0-cluster-pubsub-filters**: Hardened cluster pub/sub with Protostream codec abstraction, site-aware delivery filters, and expanded integration/unit tests for cross-DC behaviour.
