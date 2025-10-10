@@ -15,7 +15,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - User login failure provider persists brute-force counters in Valkey hashes with monotonic updates and TTL enforcement aligned with realm policies.
 
 ## Architectural Assumptions
-1. All clustering/storage touch points (distributed caches, action tokens, work cache, authorization, user sessions, offline sessions, login failures, clients, authentication sessions) can be replaced via Keycloak's `MapStorageProvider`, `HotRodConnectionProvider`, or dedicated SPI alternatives.
+1. All clustering/storage touch points (distributed caches, action tokens, work cache, authorization, user sessions, offline sessions, login failures, clients, authentication sessions) will be integrated through dedicated SPI implementations (e.g., `UserSessionProvider`, `AuthenticationSessionProvider`, `UserLoginFailureProvider`) and existing extension hooks without relying on the deprecated Map Storage architecture.
 2. Redis-compatible backends (Valkey, Redis OSS, KeyDB) will be accessed via the RESP protocol using a Java client such as Lettuce for async/reactive capabilities and cluster support.
 3. No Testcontainers/Docker availability; integration tests must rely on an embedded or in-process Redis-compatible server.
 4. Extension artifacts must be publishable as JARs that can be copied to `providers/` in a Keycloak distribution.
@@ -29,9 +29,9 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 
 2. **SPI Strategy & Provider Design**
    - Harden the new `ValkeyConnectionProviderFactory` with operational metrics and configuration validation feedback.
-   - Implement a custom `MapStorageProviderFactory` and `MapStorageProvider` that back Keycloak map storages with Redis data structures, leveraging existing map storage abstractions to avoid modifying built-in components.
+   - Deliver dedicated provider factories for each Keycloak SPI we are replacing (e.g., `UserSessionProviderFactory`, `AuthenticationSessionProviderFactory`, `UserLoginFailureProviderFactory`, `SingleUseObjectProviderFactory`) so that Valkey-backed implementations plug in directly without the Map Storage adapter layer.
    - Supply `LockProviderFactory` and `ClusterProviderFactory` implementations to replace Infinispan for distributed locks and cluster node discovery, reusing Keycloak SPI contracts.
-   - Provide caches for action tokens and short-lived data via the `ShortLivedTaskExecutor` SPI or existing caches bridging through `MapKeycloakTransaction`.
+   - Provide caches for action tokens and short-lived data via the `ShortLivedTaskExecutor` SPI or existing caches bridging through transactional hooks exposed by the native SPI contracts.
    - Add configuration properties (namespace prefix, connection URI, SSL, authentication, topology options) exposed through `META-INF/services` and `module.properties`.
 
 3. **Session & Cache Mapping**
@@ -89,7 +89,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - [ ] Draft high-level component diagram illustrating provider replacements.
 - [x] Prototype embedded Redis server bootstrapping utility for tests (no Docker/Testcontainers).
 - [x] Flesh out SPI mapping table (which Keycloak caches map to which Redis structures) within this document.
-- [ ] Implement actual provider classes following the plan (future work), focusing next on map storage and cache replacements (Valkey datastore factory scaffolding complete; login failures now delegated to Valkey, concrete map storage providers still pending).
+- [ ] Implement actual provider classes following the plan (future work), focusing next on the direct SPI provider replacements for clustered session/counter data (Valkey datastore factory scaffolding complete; login failures now delegated to Valkey, session/auth provider implementations still pending).
 - [x] Provide Valkey-backed DB lock provider with forced unlock support and configurable lease/retry settings.
 - [x] Extend connection subsystem with operational health reporting hooks and publish readiness diagnostics.
 - [x] Provide Valkey-backed cluster provider with distributed locking and local listener dispatch.
@@ -105,6 +105,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Evaluate deterministic seed data and concurrency scenarios to ensure session consistency during failover.
 
 ## Change Log
+- **v0.8.3-plan-refresh**: Reworked the architectural plan to replace Map Storage dependencies with native SPI provider implementations for Valkey-backed services.
 - **v0.8.2-login-failures**: Added a Valkey-backed user login failure provider with atomic counter updates, configurable namespaces, and embedded Valkey tests validating TTL and clearing semantics.
 - **v0.8.1-single-use**: Added a Valkey-backed single-use object provider with JSON payload encoding, scripted atomic removal, and revoked-token preload support to keep distributed action tokens in Valkey.
 - **v0.8.0-datastore**: Introduced a Valkey datastore provider factory that enforces Valkey connection/cluster prerequisites and prefers Valkey-backed SPI implementations, covered by targeted unit tests.
