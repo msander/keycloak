@@ -8,8 +8,8 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Maven module participates in the main reactor and now ships a functional Lettuce-backed `ValkeyConnectionProviderFactory` registered through the Keycloak SPI loader.
  - Embedded Valkey test harness ensures integration tests can run without Docker/Testcontainers; initial connection-provider tests exercise string and binary command paths.
  - Connection factory now reports sanitised configuration details and live health diagnostics via `ServerInfoAwareProviderFactory`.
-- Cluster provider delivers distributed lock semantics backed by Valkey with pub/sub propagation for cross-node listener notifications, including multi-site filtering and resilient message decoding while remaining agnostic of Infinispan-specific event classes.
-- DB lock provider integrates the global database lock SPI with Valkey, supporting forced unlock semantics and configurable retry/lease controls.
+- Cluster provider delivers distributed lock semantics backed by Valkey with pub/sub propagation for cross-node listener notifications, including multi-site filtering and resilient message decoding while remaining agnostic of Infinispan-specific event classes. Work completion events now unblock asynchronous executions without resorting to long polling.
+- DB lock provider integrates the global database lock SPI with Valkey, supporting forced unlock semantics and configurable retry/lease controls. Micrometer instrumentation captures acquisition latency, hold durations, and release failures for operational visibility.
 - Datastore provider factory now wraps the default store managers to prefer Valkey-backed providers and validates prerequisite Valkey infrastructure.
 - Single-use object provider backed by Valkey stores distributed action tokens with atomic removal semantics and optional revoked-token persistence.
 - User login failure provider persists brute-force counters in Valkey hashes with monotonic updates and TTL enforcement aligned with realm policies.
@@ -45,6 +45,48 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
    - Define serialization strategy using JSON or Valkey-native serializer SPIs stored in Redis hashes, with TTL handling for ephemeral entries.
    - Implement consistent key scheme with domain-specific prefixes (`user-session:realm:sessionId` etc.) and encode value payloads using Keycloak's existing serialization utilities when available.
    - Handle cross-data center replication by supporting Redis Cluster or Valkey multi-master setups; include configuration toggles for enabling read replicas.
+
+## Component Diagram
+
+```
+                           +-----------------------------+
+                           |  Keycloak Runtime (SPIs)    |
+                           +-------------+---------------+
+                                         |
+                                         v
+                    +-------------------------------------------+
+                    | ValkeyDatastoreProviderFactory            |
+                    |  (prefers Valkey-backed implementations)  |
+                    +----+-----------+-----------+--------------+
+                         |           |           |
+           +-------------+           |           +------------------+
+           |                         |                              |
+           v                         v                              v
+   +---------------+        +-----------------+          +----------------------+
+   | ValkeyCluster |        | ValkeyDBLock    |          | Valkey Session/Token |
+   | Provider      |        | Provider        |          | Providers            |
+   +-------+-------+        +--------+--------+          +----------+-----------+
+           |                           |                             |
+           | Pub/Sub events            | Lease/lock keys             | Hash/TTL storage
+           v                           v                             v
+   +--------------------------------------------------------------------------+
+   |                     Shared Valkey / Redis Backend                        |
+   +--------------------------------------------------------------------------+
+```
+
+## Cluster Pub/Sub Configuration
+
+- **Namespace (`cluster/valkey/namespace`)** – prefixes all lock keys and the pub/sub channel (defaults to `keycloak:cluster`).
+- **Channel** – derives from the namespace with the `:events` suffix; all cluster notifications (including work completion events) flow through this channel.
+- **Site name (`cluster/valkey/site`)** – optional identifier that enables multi-site filtering when using `DCNotify` values other than `ALL_DCS`.
+- **Work completion events** – the provider publishes an internal `valkey-work-completed` event after each clustered task, allowing remote waiters to unblock without relying on polling. Events are ignored by the sender but processed by other nodes that track outstanding asynchronous operations.
+- **Resilience** – message payloads are base64-encoded frames using the `ValkeyClusterEventCodec`, ensuring unknown event types are rejected early with explicit diagnostics.
+
+## Metrics & Observability
+
+- **Metric facade** – `ValkeyMetrics` wraps Micrometer, exposing timer and counter helpers with consistent tags (`category`, `operation`, `outcome`).
+- **Cluster provider metrics** – synchronous and asynchronous executions record latency while notifications contribute success/error counters.
+- **DB lock metrics** – acquisition timings, hold durations, and release/destroy failures surface via timers and counters. When a lock is held for more than ~80 % of its lease, a warning is emitted to highlight potential tuning needs.
 
 ### SPI Mapping Catalogue
 
@@ -93,27 +135,28 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 ## TODO Backlog
 - [x] Add `keycloak-valkey` Maven module with initial `pom.xml` and placeholder source set to ensure compilation.
 - [x] Define dependency management for Lettuce/Valkey client and embedded test server in the module POM.
-- [ ] Draft high-level component diagram illustrating provider replacements.
+- [x] Draft high-level component diagram illustrating provider replacements.
 - [x] Prototype embedded Redis server bootstrapping utility for tests (no Docker/Testcontainers).
 - [x] Flesh out SPI mapping table (which Keycloak caches map to which Redis structures) within this document.
 - [x] Implement user session provider backed by Valkey, covering online/offline sessions and attached client sessions with optimistic persistence and TTL alignment.
-- [ ] Implement remaining clustered session providers (work cache, user/client session cross-DC import, etc.) building on the user session infrastructure.
+- [x] Implement remaining clustered session providers (work cache, user/client session cross-DC import, etc.) building on the user session infrastructure.
 - [x] Provide Valkey-backed DB lock provider with forced unlock support and configurable lease/retry settings.
 - [x] Extend connection subsystem with operational health reporting hooks and publish readiness diagnostics.
 - [x] Provide Valkey-backed cluster provider with distributed locking and local listener dispatch.
 - [x] Implement cross-node cluster notifications using Valkey pub/sub to replace the current local-only dispatch.
 - [x] Expose configuration options for multi-site routing (local/remote DC) and document prerequisites for site naming.
-- [ ] Document cluster pub/sub configuration semantics and operational recommendations for site-aware deployments.
+- [x] Document cluster pub/sub configuration semantics and operational recommendations for site-aware deployments.
 - [x] Replace protostream-based cluster event encoding with a Valkey-native serializer SPI to eliminate Infinispan dependencies.
 - [x] Provide Valkey-backed workflow state provider with sorted-set indexes for scheduling and deterministic tests.
-- [ ] Derive reusable metrics facade (Micrometer integration) for downstream providers.
-- [ ] Evaluate adaptive lock lease tuning and observability for the DB lock provider (latency metrics, failure alarms).
+- [x] Derive reusable metrics facade (Micrometer integration) for downstream providers.
+- [x] Evaluate adaptive lock lease tuning and observability for the DB lock provider (latency metrics, failure alarms).
 
 ## Testing Notes
 - Goal is to run `mvn -pl keycloak-valkey test` without external services. Embedded server must start on random free port and clean up after tests.
 - Evaluate deterministic seed data and concurrency scenarios to ensure session consistency during failover.
 
 ## Change Log
+- **v0.8.11-cluster-metrics**: Added Micrometer-backed metrics facade, instrumented cluster and DB lock providers, introduced Valkey work-completion events to unblock async execution, documented pub/sub configuration, and published the component diagram.
 - **v0.8.10-crl-storage**: Introduced Valkey-backed CRL storage and cache providers with Valkey persistence, TTL enforcement, and embedded tests.
 - **v0.8.9-workflow-state**: Added a Valkey workflow state provider that maintains sorted-set indexes for due step scheduling with comprehensive embedded Valkey tests.
 - **v0.8.8-cluster-serialization**: Replaced protostream codecs with a Valkey-native cluster event serializer SPI, removed the Infinispan dependency, and wired dedicated serializers for public key invalidation and cache clearing events.

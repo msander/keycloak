@@ -46,6 +46,17 @@ class ValkeyClusterEventCodecTest {
     }
 
     @Test
+    void shouldSerializeWorkCompletionEvents() {
+        ValkeyWorkCompletionEvent event = new ValkeyWorkCompletionEvent("task", true);
+
+        byte[] payload = codec.encode("work", List.of(event), true, ClusterProvider.DCNotify.ALL_DCS, "node-1", "site-a");
+        ValkeyClusterEventCodec.DecodedMessage decoded = codec.decode(payload);
+
+        assertEquals(1, decoded.events().size());
+        assertTrue(decoded.events().iterator().next() instanceof ValkeyWorkCompletionEvent);
+    }
+
+    @Test
     void shouldDefaultUnknownSiteFilterToAll() throws Exception {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (DataOutputStream out = new DataOutputStream(baos)) {

@@ -8,6 +8,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import org.jboss.logging.Logger;
 import org.keycloak.models.dblock.DBLockProvider;
 import org.keycloak.valkey.config.ValkeyDBLockConfig;
+import org.keycloak.valkey.metrics.ValkeyMetrics;
 
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.SetArgs;
@@ -52,6 +53,7 @@ public class ValkeyDBLockProvider implements DBLockProvider {
         Duration recheck = config.getRecheckInterval();
         long deadline = System.nanoTime() + waitTimeout.toNanos();
         long sleepMillis = Math.max(1L, recheck.toMillis());
+        var sample = ValkeyMetrics.startTimer();
 
         logger.debugf("Acquiring DB lock %s with key %s", lock, key);
         while (System.nanoTime() < deadline) {
@@ -59,11 +61,13 @@ public class ValkeyDBLockProvider implements DBLockProvider {
                 currentLock = lock;
                 currentToken = token;
                 lockAcquiredAt = Instant.now();
+                ValkeyMetrics.record("dblock", "acquire", sample, ValkeyMetrics.Outcome.SUCCESS);
                 return;
             }
             sleepQuietly(sleepMillis);
         }
 
+        ValkeyMetrics.record("dblock", "acquire", sample, ValkeyMetrics.Outcome.TIMEOUT);
         throw new RuntimeException("Failed to acquire DB lock " + lock + " within " + waitTimeout);
     }
 
@@ -74,6 +78,7 @@ public class ValkeyDBLockProvider implements DBLockProvider {
         } catch (RuntimeException ex) {
             logger.debugf(ex, "Failed to acquire lock %s", key);
             sleepQuietly(config.getRecheckInterval().toMillis());
+            ValkeyMetrics.count("dblock", "acquire", ValkeyMetrics.Outcome.ERROR);
             return false;
         }
     }
@@ -98,14 +103,25 @@ public class ValkeyDBLockProvider implements DBLockProvider {
         }
         String key = config.keyFor(currentLock);
         String token = currentToken;
+        Instant acquiredAt = lockAcquiredAt;
         currentLock = null;
         currentToken = null;
         lockAcquiredAt = null;
 
         try {
             commands.eval(RELEASE_LOCK_SCRIPT, ScriptOutputType.INTEGER, new String[] {key}, token);
+            if (acquiredAt != null) {
+                Duration held = Duration.between(acquiredAt, Instant.now());
+                ValkeyMetrics.record("dblock", "hold", held, ValkeyMetrics.Outcome.SUCCESS);
+                long leaseMillis = config.getLockLease().toMillis();
+                if (leaseMillis > 0 && held.toMillis() > (leaseMillis * 8L / 10L)) {
+                    logger.warnf("Lock %s held for %d ms (~%.0f%% of lease)", key, held.toMillis(),
+                            (held.toMillis() * 100.0) / leaseMillis);
+                }
+            }
         } catch (RuntimeException ex) {
             logger.debugf(ex, "Failed to release lock %s", key);
+            ValkeyMetrics.count("dblock", "release", ValkeyMetrics.Outcome.ERROR);
         }
     }
 
@@ -125,6 +141,7 @@ public class ValkeyDBLockProvider implements DBLockProvider {
             commands.del(config.allKeys());
         } catch (RuntimeException ex) {
             logger.warnf(ex, "Failed to destroy Valkey DB lock state");
+            ValkeyMetrics.count("dblock", "destroy", ValkeyMetrics.Outcome.ERROR);
         }
     }
 

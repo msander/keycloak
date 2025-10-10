@@ -6,12 +6,12 @@ import java.util.Collection;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.jboss.logging.Logger;
 import org.keycloak.cluster.ClusterEvent;
@@ -20,6 +20,7 @@ import org.keycloak.cluster.ClusterProvider;
 import org.keycloak.cluster.ExecutionResult;
 import org.keycloak.common.util.ConcurrentMultivaluedHashMap;
 import org.keycloak.valkey.config.ValkeyClusterConfig;
+import org.keycloak.valkey.metrics.ValkeyMetrics;
 
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.SetArgs;
@@ -27,6 +28,7 @@ import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.pubsub.RedisPubSubAdapter;
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
 import io.lettuce.core.RedisClient;
+import io.micrometer.core.instrument.Timer;
 
 /**
  * Redis/Valkey backed implementation of {@link ClusterProvider} using optimistic locking primitives.
@@ -35,6 +37,7 @@ public class ValkeyClusterProvider implements ClusterProvider {
 
     private static final Logger logger = Logger.getLogger(ValkeyClusterProvider.class);
     private static final String RELEASE_LOCK_SCRIPT = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
+    private static final String WORK_COMPLETED_TASK_KEY = "valkey-work-completed";
 
     private final String nodeId;
     private final int clusterStartupTime;
@@ -57,6 +60,14 @@ public class ValkeyClusterProvider implements ClusterProvider {
         this.commandConnection = redisClient.connect();
         this.pubSubConnection = redisClient.connectPubSub();
         subscribeForEvents();
+        registerListener(WORK_COMPLETED_TASK_KEY, event -> {
+            if (event instanceof ValkeyWorkCompletionEvent completion) {
+                CompletableFuture<Boolean> future = asyncInvocations.get(completion.lockKey());
+                if (future != null && !future.isDone()) {
+                    future.complete(completion.success());
+                }
+            }
+        });
     }
 
     @Override
@@ -89,21 +100,26 @@ public class ValkeyClusterProvider implements ClusterProvider {
         String lockKey = config.taskKey(taskKey);
         long ttlMillis = Math.max(1, taskTimeoutInSeconds) * 1000L;
         String token = tokenFor(lockKey);
+        var sample = ValkeyMetrics.startTimer();
         String response = commandConnection.sync().set(lockKey, token, SetArgs.Builder.nx().px(ttlMillis));
         boolean acquired = "OK".equalsIgnoreCase(response);
         if (!acquired) {
             if (logger.isTraceEnabled()) {
                 logger.tracef("Lock already held for %s", lockKey);
             }
+            ValkeyMetrics.record("cluster", "execute.sync", sample, ValkeyMetrics.Outcome.TIMEOUT);
             return ExecutionResult.notExecuted();
         }
 
         try {
             T result = task.call();
+            ValkeyMetrics.record("cluster", "execute.sync", sample, ValkeyMetrics.Outcome.SUCCESS);
             return ExecutionResult.executed(result);
         } catch (RuntimeException ex) {
+            ValkeyMetrics.record("cluster", "execute.sync", sample, ValkeyMetrics.Outcome.ERROR);
             throw ex;
         } catch (Exception ex) {
+            ValkeyMetrics.record("cluster", "execute.sync", sample, ValkeyMetrics.Outcome.ERROR);
             throw new RuntimeException("Task execution failed for key " + taskKey, ex);
         } finally {
             releaseLock(lockKey, token);
@@ -123,34 +139,49 @@ public class ValkeyClusterProvider implements ClusterProvider {
             return future;
         });
         if (created.get()) {
-            executor.submit(() -> runAsync(taskKey, taskTimeoutInSeconds, task, lockKey, managedFuture));
+            var sample = ValkeyMetrics.startTimer();
+            executor.submit(() -> runAsync(taskKey, taskTimeoutInSeconds, task, lockKey, managedFuture, sample));
             return managedFuture;
         }
+        ValkeyMetrics.count("cluster", "execute.async", ValkeyMetrics.Outcome.TIMEOUT);
         return CompletableFuture.completedFuture(false);
     }
 
-    private void runAsync(String taskKey, int timeoutSeconds, Callable task, String lockKey, CompletableFuture<Boolean> future) {
+    private void runAsync(String taskKey, int timeoutSeconds, Callable task, String lockKey,
+            CompletableFuture<Boolean> future, Timer.Sample sample) {
         try {
             ExecutionResult<?> result = executeIfNotExecuted(taskKey, timeoutSeconds, task);
             if (result.isExecuted()) {
+                ValkeyMetrics.record("cluster", "execute.async", sample, ValkeyMetrics.Outcome.SUCCESS);
                 future.complete(true);
+                publishWorkCompletion(lockKey, true);
             } else {
-                waitForCompletion(lockKey, timeoutSeconds);
-                future.complete(false);
+                ValkeyMetrics.record("cluster", "execute.async", sample, ValkeyMetrics.Outcome.TIMEOUT);
+                Timer.Sample waitSample = ValkeyMetrics.startTimer();
+                waitForCompletion(lockKey, timeoutSeconds, future);
+                if (future.complete(false)) {
+                    ValkeyMetrics.record("cluster", "execute.async.wait", waitSample,
+                            ValkeyMetrics.Outcome.TIMEOUT);
+                } else {
+                    ValkeyMetrics.record("cluster", "execute.async.wait", waitSample,
+                            ValkeyMetrics.Outcome.SUCCESS);
+                }
             }
         } catch (Throwable ex) {
+            ValkeyMetrics.record("cluster", "execute.async", sample, ValkeyMetrics.Outcome.ERROR);
+            publishWorkCompletion(lockKey, false);
             future.completeExceptionally(ex);
         } finally {
             asyncInvocations.remove(lockKey, future);
         }
     }
 
-    private void waitForCompletion(String lockKey, int timeoutSeconds) {
+    private void waitForCompletion(String lockKey, int timeoutSeconds, CompletableFuture<Boolean> future) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(timeoutSeconds, 1));
         Duration interval = config.getCompletionPollInterval();
         long sleepMillis = interval.toMillis();
         while (System.nanoTime() < deadline) {
-            if (!isLockPresent(lockKey)) {
+            if (future.isDone() || !isLockPresent(lockKey)) {
                 return;
             }
             try {
@@ -194,6 +225,7 @@ public class ValkeyClusterProvider implements ClusterProvider {
             dispatchLocal(taskKey, events);
         }
         publish(taskKey, events, ignoreSender, effectiveNotify);
+        ValkeyMetrics.count("cluster", "notify", ValkeyMetrics.Outcome.SUCCESS);
     }
 
     @Override
@@ -269,6 +301,15 @@ public class ValkeyClusterProvider implements ClusterProvider {
             commandConnection.sync().publish(config.getChannel(), payload);
         } catch (RuntimeException ex) {
             logger.warnf(ex, "Failed to publish cluster event for task %s", taskKey);
+            ValkeyMetrics.count("cluster", "notify", ValkeyMetrics.Outcome.ERROR);
+        }
+    }
+
+    private void publishWorkCompletion(String lockKey, boolean success) {
+        try {
+            notify(WORK_COMPLETED_TASK_KEY, new ValkeyWorkCompletionEvent(lockKey, success), true);
+        } catch (RuntimeException ex) {
+            logger.debugf(ex, "Failed to publish work completion for %s", lockKey);
         }
     }
 }
