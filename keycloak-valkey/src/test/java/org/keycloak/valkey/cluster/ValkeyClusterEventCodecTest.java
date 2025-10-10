@@ -6,13 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.keycloak.cluster.ClusterEvent;
 import org.keycloak.cluster.ClusterProvider;
-
-import com.google.protobuf.CodedOutputStream;
 
 class ValkeyClusterEventCodecTest {
 
@@ -48,13 +48,16 @@ class ValkeyClusterEventCodecTest {
     @Test
     void shouldDefaultUnknownSiteFilterToAll() throws Exception {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        CodedOutputStream writer = CodedOutputStream.newInstance(baos);
-        writer.writeString(1, "channel");
-        writer.writeString(2, "node-1");
-        writer.writeString(3, "site-a");
-        writer.writeEnum(4, 42);
-        writer.writeBool(5, false);
-        writer.flush();
+        try (DataOutputStream out = new DataOutputStream(baos)) {
+            writeString(out, "channel");
+            out.writeBoolean(true);
+            writeString(out, "node-1");
+            out.writeBoolean(true);
+            writeString(out, "site-a");
+            out.writeByte(42);
+            out.writeBoolean(false);
+            out.writeInt(0);
+        }
 
         ValkeyClusterEventCodec.DecodedMessage decoded = codec.decode(baos.toByteArray());
         assertTrue(decoded.shouldDeliver("node-2", "any"));
@@ -63,5 +66,11 @@ class ValkeyClusterEventCodecTest {
     @Test
     void shouldRejectMissingEventKey() {
         assertThrows(IllegalStateException.class, () -> codec.decode(new byte[0]));
+    }
+
+    private static void writeString(DataOutputStream out, String value) throws IOException {
+        byte[] bytes = value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        out.writeInt(bytes.length);
+        out.write(bytes);
     }
 }

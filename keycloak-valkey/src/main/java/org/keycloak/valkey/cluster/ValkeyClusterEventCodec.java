@@ -1,37 +1,37 @@
 package org.keycloak.valkey.cluster;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataInput;
+import java.io.DataInputStream;
+import java.io.DataOutput;
+import java.io.DataOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.ServiceLoader;
 
-import org.infinispan.protostream.ProtobufUtil;
-import org.infinispan.protostream.SerializationContext;
-import org.infinispan.protostream.SerializationContextInitializer;
-import org.infinispan.protostream.config.Configuration;
 import org.jboss.logging.Logger;
 import org.keycloak.cluster.ClusterEvent;
 import org.keycloak.cluster.ClusterProvider;
 
-import com.google.protobuf.CodedInputStream;
-import com.google.protobuf.CodedOutputStream;
-import com.google.protobuf.WireFormat;
-
 /**
- * Encodes and decodes {@link ClusterEvent} collections for transport over Redis Pub/Sub using Protostream schemas
- * already present on the Keycloak classpath.
+ * Encodes and decodes {@link ClusterEvent} collections for transport over Redis Pub/Sub using pluggable
+ * {@link ValkeyClusterEventSerializer} implementations discovered via the {@link ServiceLoader}.
  */
 final class ValkeyClusterEventCodec {
 
     private static final Logger logger = Logger.getLogger(ValkeyClusterEventCodec.class);
 
-    private final SerializationContext context;
+    private final SerializerRegistry serializers;
 
     ValkeyClusterEventCodec() {
-        this.context = createContext();
+        this.serializers = SerializerRegistry.load();
     }
 
     byte[] encode(String eventKey, Collection<? extends ClusterEvent> events, boolean ignoreSender,
@@ -42,22 +42,19 @@ final class ValkeyClusterEventCodec {
         SiteFilter filter = SiteFilter.from(dcNotify);
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            CodedOutputStream writer = CodedOutputStream.newInstance(baos);
-            writer.writeString(1, eventKey);
-            if (senderNodeId != null) {
-                writer.writeString(2, senderNodeId);
+            try (DataOutputStream out = new DataOutputStream(baos)) {
+                writeString(out, eventKey);
+                writeNullableString(out, senderNodeId);
+                writeNullableString(out, senderSite);
+                out.writeByte(filter.ordinal());
+                out.writeBoolean(ignoreSender);
+                out.writeInt(events.size());
+                for (ClusterEvent event : events) {
+                    serializers.encode(event, out);
+                }
+                out.flush();
+                return baos.toByteArray();
             }
-            if (senderSite != null) {
-                writer.writeString(3, senderSite);
-            }
-            writer.writeEnum(4, filter.ordinal());
-            writer.writeBool(5, ignoreSender);
-            for (ClusterEvent event : events) {
-                byte[] payload = ProtobufUtil.toWrappedByteArray(context, event);
-                writer.writeByteArray(6, payload);
-            }
-            writer.flush();
-            return baos.toByteArray();
         } catch (IOException ex) {
             throw new IllegalStateException("Unable to encode cluster event payload", ex);
         }
@@ -66,33 +63,22 @@ final class ValkeyClusterEventCodec {
     DecodedMessage decode(byte[] data) {
         Objects.requireNonNull(data, "data");
         try {
-            CodedInputStream reader = CodedInputStream.newInstance(data);
-            String eventKey = null;
-            String senderNode = null;
-            String senderSite = null;
-            SiteFilter filter = SiteFilter.ALL;
-            boolean ignoreSender = false;
-            List<ClusterEvent> events = new ArrayList<>();
-            int tag;
-            while ((tag = reader.readTag()) != 0) {
-                switch (WireFormat.getTagFieldNumber(tag)) {
-                    case 1 -> eventKey = reader.readStringRequireUtf8();
-                    case 2 -> senderNode = reader.readStringRequireUtf8();
-                    case 3 -> senderSite = reader.readStringRequireUtf8();
-                    case 4 -> filter = resolveFilter(reader.readEnum());
-                    case 5 -> ignoreSender = reader.readBool();
-                    case 6 -> {
-                        byte[] payload = reader.readByteArray();
-                        ClusterEvent event = decodeEvent(payload);
-                        events.add(event);
-                    }
-                    default -> reader.skipField(tag);
+            try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(data))) {
+                String eventKey = readString(in);
+                String senderNode = readNullableString(in);
+                String senderSite = readNullableString(in);
+                SiteFilter filter = resolveFilter(Byte.toUnsignedInt(in.readByte()));
+                boolean ignoreSender = in.readBoolean();
+                int eventCount = in.readInt();
+                if (eventCount < 0) {
+                    throw new IllegalStateException("Negative event count in cluster payload");
                 }
+                List<ClusterEvent> events = new ArrayList<>(eventCount);
+                for (int i = 0; i < eventCount; i++) {
+                    events.add(serializers.decode(in));
+                }
+                return new DecodedMessage(eventKey, events, senderNode, senderSite, filter, ignoreSender);
             }
-            if (eventKey == null) {
-                throw new IllegalStateException("Cluster event payload missing event key");
-            }
-            return new DecodedMessage(eventKey, events, senderNode, senderSite, filter, ignoreSender);
         } catch (IOException ex) {
             throw new IllegalStateException("Unable to decode cluster event payload", ex);
         }
@@ -107,22 +93,126 @@ final class ValkeyClusterEventCodec {
         return values[ordinal];
     }
 
-    private ClusterEvent decodeEvent(byte[] payload) throws IOException {
-        return (ClusterEvent) ProtobufUtil.fromWrappedByteArray(context, payload);
+    private static void writeString(DataOutput out, String value) throws IOException {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        out.writeInt(bytes.length);
+        out.write(bytes);
     }
 
-    private SerializationContext createContext() {
-        SerializationContext ctx = ProtobufUtil.newSerializationContext(Configuration.builder().build());
-        ServiceLoader<SerializationContextInitializer> loader = ServiceLoader.load(SerializationContextInitializer.class);
-        for (SerializationContextInitializer initializer : loader) {
-            try {
-                initializer.registerSchema(ctx);
-                initializer.registerMarshallers(ctx);
-            } catch (RuntimeException ex) {
-                logger.debugf(ex, "Failed to register protostream schema from %s", initializer.getClass());
-            }
+    private static String readString(DataInput in) throws IOException {
+        int length = in.readInt();
+        if (length < 0) {
+            throw new IllegalStateException("Negative string length in cluster payload");
         }
-        return ctx;
+        byte[] data = new byte[length];
+        in.readFully(data);
+        return new String(data, StandardCharsets.UTF_8);
+    }
+
+    private static void writeNullableString(DataOutput out, String value) throws IOException {
+        if (value == null) {
+            out.writeBoolean(false);
+        } else {
+            out.writeBoolean(true);
+            writeString(out, value);
+        }
+    }
+
+    private static String readNullableString(DataInput in) throws IOException {
+        boolean present = in.readBoolean();
+        return present ? readString(in) : null;
+    }
+
+    private static final class SerializerRegistry {
+
+        private final Map<String, ValkeyClusterEventSerializer<?>> byTypeId;
+        private final List<ValkeyClusterEventSerializer<?>> serializers;
+
+        private SerializerRegistry(Map<String, ValkeyClusterEventSerializer<?>> byTypeId,
+                List<ValkeyClusterEventSerializer<?>> serializers) {
+            this.byTypeId = Map.copyOf(byTypeId);
+            this.serializers = List.copyOf(serializers);
+        }
+
+        static SerializerRegistry load() {
+            Map<String, ValkeyClusterEventSerializer<?>> byId = new HashMap<>();
+            List<ValkeyClusterEventSerializer<?>> serializers = new ArrayList<>();
+            @SuppressWarnings("rawtypes")
+            ServiceLoader<ValkeyClusterEventSerializer> loader = ServiceLoader.load(ValkeyClusterEventSerializer.class);
+            for (ValkeyClusterEventSerializer serializer : loader) {
+                ValkeyClusterEventSerializer<?> typed = serializer;
+                ValkeyClusterEventSerializer<?> existing = byId.putIfAbsent(typed.getTypeId(), typed);
+                if (existing != null) {
+                    throw new IllegalStateException("Duplicate Valkey cluster event serializer for type "
+                            + typed.getTypeId() + " from " + typed.getClass() + " and " + existing.getClass());
+                }
+                serializers.add(typed);
+            }
+            return new SerializerRegistry(byId, serializers);
+        }
+
+        void encode(ClusterEvent event, DataOutput out) throws IOException {
+            ValkeyClusterEventSerializer<ClusterEvent> serializer = findSerializer(event.getClass());
+            byte[] payload = serializer.serialize(event);
+            writeString(out, serializer.getTypeId());
+            out.writeInt(payload.length);
+            out.write(payload);
+        }
+
+        ClusterEvent decode(DataInput in) throws IOException {
+            String typeId = readString(in);
+            ValkeyClusterEventSerializer<?> serializer = byTypeId.get(typeId);
+            if (serializer == null) {
+                throw new IllegalStateException("No Valkey cluster event serializer registered for type " + typeId);
+            }
+            int length = in.readInt();
+            if (length < 0) {
+                throw new IllegalStateException("Negative payload length for cluster event type " + typeId);
+            }
+            byte[] payload = new byte[length];
+            in.readFully(payload);
+            return deserialize(serializer, payload);
+        }
+
+        @SuppressWarnings("unchecked")
+        private ValkeyClusterEventSerializer<ClusterEvent> findSerializer(Class<? extends ClusterEvent> eventType) {
+            ValkeyClusterEventSerializer<?> bestMatch = null;
+            int bestDepth = Integer.MAX_VALUE;
+            for (ValkeyClusterEventSerializer<?> serializer : serializers) {
+                Class<?> supported = serializer.getEventType();
+                if (!supported.isAssignableFrom(eventType)) {
+                    continue;
+                }
+                int depth = hierarchyDistance(eventType, supported);
+                if (depth < bestDepth) {
+                    bestDepth = depth;
+                    bestMatch = serializer;
+                }
+            }
+            if (bestMatch == null) {
+                throw new IllegalStateException("No Valkey cluster event serializer registered for event class "
+                        + eventType.getName());
+            }
+            return (ValkeyClusterEventSerializer<ClusterEvent>) bestMatch;
+        }
+
+        private int hierarchyDistance(Class<?> type, Class<?> target) {
+            int depth = 0;
+            Class<?> current = type;
+            while (current != null) {
+                if (target.isAssignableFrom(current)) {
+                    return depth;
+                }
+                current = current.getSuperclass();
+                depth++;
+            }
+            return Integer.MAX_VALUE / 2;
+        }
+
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        private ClusterEvent deserialize(ValkeyClusterEventSerializer serializer, byte[] payload) throws IOException {
+            return (ClusterEvent) serializer.deserialize(payload);
+        }
     }
 
     enum SiteFilter {

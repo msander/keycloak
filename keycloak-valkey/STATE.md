@@ -16,6 +16,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Authentication session provider stores root sessions and per-tab authentication state in Valkey hashes with optimistic updates and TTL derived from realm lifespans.
 - User session provider persists online and offline user sessions together with client sessions in Valkey hashes, enforcing realm lifespans/idle timeouts via TTL and optimistic transactions.
 - User session persister stores durable online and offline sessions plus client session metadata in Valkey with query indexes for counts, pagination, and expiry management.
+- Public key cache now uses a Valkey-aware storage provider with cluster invalidation events, local cache clearing hooks, and Valkey-native event serializers that avoid Protostream dependencies.
 
 ## Architectural Assumptions
 1. All clustering/storage touch points (distributed caches, action tokens, work cache, authorization, user sessions, offline sessions, login failures, clients, authentication sessions) will be integrated through dedicated SPI implementations (e.g., `UserSessionProvider`, `AuthenticationSessionProvider`, `UserLoginFailureProvider`) and existing extension hooks without relying on the deprecated Map Storage architecture.
@@ -39,7 +40,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 
 3. **Session & Cache Mapping**
    - Target the distributed caches (authentication sessions, user sessions, action tokens, login failures, work cache) as they directly impact cluster consistency; local caches remain handled by the embedded Keycloak process and stay with their default providers.
-   - Define serialization strategy using JSON/Protostream equivalents stored in Redis hashes, with TTL handling for ephemeral entries.
+   - Define serialization strategy using JSON or Valkey-native serializer SPIs stored in Redis hashes, with TTL handling for ephemeral entries.
    - Implement consistent key scheme with domain-specific prefixes (`user-session:realm:sessionId` etc.) and encode value payloads using Keycloak's existing serialization utilities when available.
    - Handle cross-data center replication by supporting Redis Cluster or Valkey multi-master setups; include configuration toggles for enabling read replicas.
 
@@ -100,7 +101,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - [x] Implement cross-node cluster notifications using Valkey pub/sub to replace the current local-only dispatch.
 - [x] Expose configuration options for multi-site routing (local/remote DC) and document prerequisites for site naming.
 - [ ] Document cluster pub/sub configuration semantics and operational recommendations for site-aware deployments.
-- [ ] Extract reusable protostream schemas for cluster events into a neutral module so Infinispan is no longer required on the classpath.
+- [x] Replace protostream-based cluster event encoding with a Valkey-native serializer SPI to eliminate Infinispan dependencies.
 - [ ] Derive reusable metrics facade (Micrometer integration) for downstream providers.
 - [ ] Evaluate adaptive lock lease tuning and observability for the DB lock provider (latency metrics, failure alarms).
 
@@ -111,6 +112,8 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 ## Change Log
 - **v0.8.5-user-sessions**: Added a Valkey-backed user session provider with online/offline session storage, client session attachments, TTL-aware optimistic updates, and embedded lifecycle tests.
 - **v0.8.6-session-persister**: Introduced a Valkey user session persister with indexed storage for session/client lookups, expiration handling, and embedded tests covering counts, offline retrieval, and cleanup.
+- **v0.8.8-cluster-serialization**: Replaced protostream codecs with a Valkey-native cluster event serializer SPI, removed the Infinispan dependency, and wired dedicated serializers for public key invalidation and cache clearing events.
+- **v0.8.7-public-keys**: Added Valkey-backed public key storage and cache providers with protostream-encoded cluster invalidations, local cache clearing support, and concurrency-focused unit tests.
 - **v0.8.4-auth-sessions**: Added a Valkey-backed authentication session provider with optimistic Valkey persistence, configurable session limits, and embedded tests covering auth note propagation and root session lifecycle.
 - **v0.8.3-plan-refresh**: Reworked the architectural plan to replace Map Storage dependencies with native SPI provider implementations for Valkey-backed services.
 - **v0.8.2-login-failures**: Added a Valkey-backed user login failure provider with atomic counter updates, configurable namespaces, and embedded Valkey tests validating TTL and clearing semantics.
