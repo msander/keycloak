@@ -10,6 +10,9 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
  - Connection factory now reports sanitised configuration details and live health diagnostics via `ServerInfoAwareProviderFactory`.
 - Cluster provider delivers distributed lock semantics backed by Valkey with pub/sub propagation for cross-node listener notifications, including multi-site filtering and resilient message decoding while remaining agnostic of Infinispan-specific event classes.
 - DB lock provider integrates the global database lock SPI with Valkey, supporting forced unlock semantics and configurable retry/lease controls.
+- Datastore provider factory now wraps the default store managers to prefer Valkey-backed providers and validates prerequisite Valkey infrastructure.
+- Single-use object provider backed by Valkey stores distributed action tokens with atomic removal semantics and optional revoked-token persistence.
+- User login failure provider persists brute-force counters in Valkey hashes with monotonic updates and TTL enforcement aligned with realm policies.
 
 ## Architectural Assumptions
 1. All clustering/storage touch points (distributed caches, action tokens, work cache, authorization, user sessions, offline sessions, login failures, clients, authentication sessions) can be replaced via Keycloak's `MapStorageProvider`, `HotRodConnectionProvider`, or dedicated SPI alternatives.
@@ -32,6 +35,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
    - Add configuration properties (namespace prefix, connection URI, SSL, authentication, topology options) exposed through `META-INF/services` and `module.properties`.
 
 3. **Session & Cache Mapping**
+   - Target the distributed caches (authentication sessions, user sessions, action tokens, login failures, work cache) as they directly impact cluster consistency; local caches remain handled by the embedded Keycloak process and stay with their default providers.
    - Define serialization strategy using JSON/Protostream equivalents stored in Redis hashes, with TTL handling for ephemeral entries.
    - Implement consistent key scheme with domain-specific prefixes (`user-session:realm:sessionId` etc.) and encode value payloads using Keycloak's existing serialization utilities when available.
    - Handle cross-data center replication by supporting Redis Cluster or Valkey multi-master setups; include configuration toggles for enabling read replicas.
@@ -56,6 +60,8 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 | `authenticationSessions` / AuthenticationSessionProvider | Hash | `auth-session:{realmId}:{rootSessionId}` | Absolute expiry (auth session lifespan) | Clustered | Root authentication sessions expire according to authentication lifespan settings. |
 | `actionTokens` / SingleUseObjectProvider | Hash + Sorted set index | `action-token:{tokenId}` | Absolute expiry (token lifespan) | Clustered | Single-use tokens stored as hash payloads with a sorted-set index to support efficient sweeps. |
 | `work` / ClusterProvider (WorkCache) | Stream | `work:{realmId}` | Client managed | Clustered | Cluster task queue implemented via Redis Streams with consumer groups for node coordination. |
+
+> **Note:** Local cache replacements (realm, user, authorization metadata) are intentionally out of scope for this extension because they are embedded within each Keycloak node. The focus is ensuring cluster-visible data uses Valkey-backed providers with strong consistency semantics.
 
 4. **Startup Lifecycle Integration**
    - Register providers via `META-INF/services/org.keycloak.provider.ProviderFactory` and `org.keycloak.Config.Scope` metadata.
@@ -83,7 +89,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - [ ] Draft high-level component diagram illustrating provider replacements.
 - [x] Prototype embedded Redis server bootstrapping utility for tests (no Docker/Testcontainers).
 - [x] Flesh out SPI mapping table (which Keycloak caches map to which Redis structures) within this document.
-- [ ] Implement actual provider classes following the plan (future work), focusing next on map storage and cache replacements.
+- [ ] Implement actual provider classes following the plan (future work), focusing next on map storage and cache replacements (Valkey datastore factory scaffolding complete; login failures now delegated to Valkey, concrete map storage providers still pending).
 - [x] Provide Valkey-backed DB lock provider with forced unlock support and configurable lease/retry settings.
 - [x] Extend connection subsystem with operational health reporting hooks and publish readiness diagnostics.
 - [x] Provide Valkey-backed cluster provider with distributed locking and local listener dispatch.
@@ -99,6 +105,9 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Evaluate deterministic seed data and concurrency scenarios to ensure session consistency during failover.
 
 ## Change Log
+- **v0.8.2-login-failures**: Added a Valkey-backed user login failure provider with atomic counter updates, configurable namespaces, and embedded Valkey tests validating TTL and clearing semantics.
+- **v0.8.1-single-use**: Added a Valkey-backed single-use object provider with JSON payload encoding, scripted atomic removal, and revoked-token preload support to keep distributed action tokens in Valkey.
+- **v0.8.0-datastore**: Introduced a Valkey datastore provider factory that enforces Valkey connection/cluster prerequisites and prefers Valkey-backed SPI implementations, covered by targeted unit tests.
 - **v0.7.1-spi-mapping**: Documented the SPI-to-Valkey data structure catalogue and codified descriptors covering all clustered and local caches.
 - **v0.7.0-dblock**: Added a Valkey-backed global DB lock provider with configurable timeouts, startup forced-unlock support, and comprehensive embedded Valkey tests.
 - **v0.6.1-decouple-infinispan**: Removed the direct build dependency on `keycloak-model-infinispan`, introduced test-local protostream schema/fixtures, and documented the path toward neutral cluster-event serialization.
