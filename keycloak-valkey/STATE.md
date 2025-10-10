@@ -13,6 +13,9 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Datastore provider factory now wraps the default store managers to prefer Valkey-backed providers and validates prerequisite Valkey infrastructure.
 - Single-use object provider backed by Valkey stores distributed action tokens with atomic removal semantics and optional revoked-token persistence.
 - User login failure provider persists brute-force counters in Valkey hashes with monotonic updates and TTL enforcement aligned with realm policies.
+- Authentication session provider stores root sessions and per-tab authentication state in Valkey hashes with optimistic updates and TTL derived from realm lifespans.
+- User session provider persists online and offline user sessions together with client sessions in Valkey hashes, enforcing realm lifespans/idle timeouts via TTL and optimistic transactions.
+- User session persister stores durable online and offline sessions plus client session metadata in Valkey with query indexes for counts, pagination, and expiry management.
 
 ## Architectural Assumptions
 1. All clustering/storage touch points (distributed caches, action tokens, work cache, authorization, user sessions, offline sessions, login failures, clients, authentication sessions) will be integrated through dedicated SPI implementations (e.g., `UserSessionProvider`, `AuthenticationSessionProvider`, `UserLoginFailureProvider`) and existing extension hooks without relying on the deprecated Map Storage architecture.
@@ -89,7 +92,8 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - [ ] Draft high-level component diagram illustrating provider replacements.
 - [x] Prototype embedded Redis server bootstrapping utility for tests (no Docker/Testcontainers).
 - [x] Flesh out SPI mapping table (which Keycloak caches map to which Redis structures) within this document.
-- [ ] Implement actual provider classes following the plan (future work), focusing next on the direct SPI provider replacements for clustered session/counter data (Valkey datastore factory scaffolding complete; login failures now delegated to Valkey, session/auth provider implementations still pending).
+- [x] Implement user session provider backed by Valkey, covering online/offline sessions and attached client sessions with optimistic persistence and TTL alignment.
+- [ ] Implement remaining clustered session providers (work cache, user/client session cross-DC import, etc.) building on the user session infrastructure.
 - [x] Provide Valkey-backed DB lock provider with forced unlock support and configurable lease/retry settings.
 - [x] Extend connection subsystem with operational health reporting hooks and publish readiness diagnostics.
 - [x] Provide Valkey-backed cluster provider with distributed locking and local listener dispatch.
@@ -105,6 +109,9 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Evaluate deterministic seed data and concurrency scenarios to ensure session consistency during failover.
 
 ## Change Log
+- **v0.8.5-user-sessions**: Added a Valkey-backed user session provider with online/offline session storage, client session attachments, TTL-aware optimistic updates, and embedded lifecycle tests.
+- **v0.8.6-session-persister**: Introduced a Valkey user session persister with indexed storage for session/client lookups, expiration handling, and embedded tests covering counts, offline retrieval, and cleanup.
+- **v0.8.4-auth-sessions**: Added a Valkey-backed authentication session provider with optimistic Valkey persistence, configurable session limits, and embedded tests covering auth note propagation and root session lifecycle.
 - **v0.8.3-plan-refresh**: Reworked the architectural plan to replace Map Storage dependencies with native SPI provider implementations for Valkey-backed services.
 - **v0.8.2-login-failures**: Added a Valkey-backed user login failure provider with atomic counter updates, configurable namespaces, and embedded Valkey tests validating TTL and clearing semantics.
 - **v0.8.1-single-use**: Added a Valkey-backed single-use object provider with JSON payload encoding, scripted atomic removal, and revoked-token preload support to keep distributed action tokens in Valkey.
