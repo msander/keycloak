@@ -168,6 +168,37 @@ class ValkeyClusterProviderTest {
     }
 
     @Test
+    void shouldCompleteAsyncWaitersViaEvents() throws Exception {
+        clusterConfig.put("completion-poll-interval", "PT5S");
+        try {
+            setUpProviders();
+
+            CountDownLatch entered = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+
+            Future<Boolean> primary = cluster1.executeIfNotExecutedAsync("async-events", 5, (Callable<Void>) () -> {
+                entered.countDown();
+                release.await(2, TimeUnit.SECONDS);
+                return null;
+            });
+
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            long start = System.nanoTime();
+            Future<Boolean> secondary = cluster2.executeIfNotExecutedAsync("async-events", 5,
+                    (Callable<Void>) () -> null);
+
+            release.countDown();
+            assertFalse(secondary.get(5, TimeUnit.SECONDS));
+            long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+            assertTrue(elapsed < 3000, "Event-driven completion should finish before poll interval elapsed");
+
+            assertTrue(primary.get(5, TimeUnit.SECONDS));
+        } finally {
+            clusterConfig.remove("completion-poll-interval");
+        }
+    }
+
+    @Test
     void shouldDispatchEventsToLocalListeners() throws Exception {
         setUpProviders();
 

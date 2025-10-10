@@ -1,1 +1,2 @@
 org.keycloak.valkey.cluster.TestClusterEventSerializer
+org.keycloak.valkey.cluster.ValkeyWorkCompletionEventSerializer
