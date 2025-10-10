@@ -17,6 +17,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - User session provider persists online and offline user sessions together with client sessions in Valkey hashes, enforcing realm lifespans/idle timeouts via TTL and optimistic transactions.
 - User session persister stores durable online and offline sessions plus client session metadata in Valkey with query indexes for counts, pagination, and expiry management.
 - Public key cache now uses a Valkey-aware storage provider with cluster invalidation events, local cache clearing hooks, and Valkey-native event serializers that avoid Protostream dependencies.
+- Workflow state provider stores scheduled workflow steps in Valkey hashes with sorted-set indexes to support due-step scans and indexed lookups, backed by embedded Valkey tests.
 
 ## Architectural Assumptions
 1. All clustering/storage touch points (distributed caches, action tokens, work cache, authorization, user sessions, offline sessions, login failures, clients, authentication sessions) will be integrated through dedicated SPI implementations (e.g., `UserSessionProvider`, `AuthenticationSessionProvider`, `UserLoginFailureProvider`) and existing extension hooks without relying on the deprecated Map Storage architecture.
@@ -64,6 +65,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 | `authenticationSessions` / AuthenticationSessionProvider | Hash | `auth-session:{realmId}:{rootSessionId}` | Absolute expiry (auth session lifespan) | Clustered | Root authentication sessions expire according to authentication lifespan settings. |
 | `actionTokens` / SingleUseObjectProvider | Hash + Sorted set index | `action-token:{tokenId}` | Absolute expiry (token lifespan) | Clustered | Single-use tokens stored as hash payloads with a sorted-set index to support efficient sweeps. |
 | `work` / ClusterProvider (WorkCache) | Stream | `work:{realmId}` | Client managed | Clustered | Cluster task queue implemented via Redis Streams with consumer groups for node coordination. |
+| `workflowState` / WorkflowStateProvider | Hash + Sorted set indexes | `workflow-state:{realmId}:{executionId}` | Client managed | Clustered | Scheduled workflow steps persisted as hashes with workflow/resource/step indexes for due-step scans. |
 
 > **Note:** Local cache replacements (realm, user, authorization metadata) are intentionally out of scope for this extension because they are embedded within each Keycloak node. The focus is ensuring cluster-visible data uses Valkey-backed providers with strong consistency semantics.
 
@@ -102,6 +104,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - [x] Expose configuration options for multi-site routing (local/remote DC) and document prerequisites for site naming.
 - [ ] Document cluster pub/sub configuration semantics and operational recommendations for site-aware deployments.
 - [x] Replace protostream-based cluster event encoding with a Valkey-native serializer SPI to eliminate Infinispan dependencies.
+- [x] Provide Valkey-backed workflow state provider with sorted-set indexes for scheduling and deterministic tests.
 - [ ] Derive reusable metrics facade (Micrometer integration) for downstream providers.
 - [ ] Evaluate adaptive lock lease tuning and observability for the DB lock provider (latency metrics, failure alarms).
 
@@ -110,10 +113,11 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Evaluate deterministic seed data and concurrency scenarios to ensure session consistency during failover.
 
 ## Change Log
-- **v0.8.5-user-sessions**: Added a Valkey-backed user session provider with online/offline session storage, client session attachments, TTL-aware optimistic updates, and embedded lifecycle tests.
-- **v0.8.6-session-persister**: Introduced a Valkey user session persister with indexed storage for session/client lookups, expiration handling, and embedded tests covering counts, offline retrieval, and cleanup.
+- **v0.8.9-workflow-state**: Added a Valkey workflow state provider that maintains sorted-set indexes for due step scheduling with comprehensive embedded Valkey tests.
 - **v0.8.8-cluster-serialization**: Replaced protostream codecs with a Valkey-native cluster event serializer SPI, removed the Infinispan dependency, and wired dedicated serializers for public key invalidation and cache clearing events.
 - **v0.8.7-public-keys**: Added Valkey-backed public key storage and cache providers with protostream-encoded cluster invalidations, local cache clearing support, and concurrency-focused unit tests.
+- **v0.8.6-session-persister**: Introduced a Valkey user session persister with indexed storage for session/client lookups, expiration handling, and embedded tests covering counts, offline retrieval, and cleanup.
+- **v0.8.5-user-sessions**: Added a Valkey-backed user session provider with online/offline session storage, client session attachments, TTL-aware optimistic updates, and embedded lifecycle tests.
 - **v0.8.4-auth-sessions**: Added a Valkey-backed authentication session provider with optimistic Valkey persistence, configurable session limits, and embedded tests covering auth note propagation and root session lifecycle.
 - **v0.8.3-plan-refresh**: Reworked the architectural plan to replace Map Storage dependencies with native SPI provider implementations for Valkey-backed services.
 - **v0.8.2-login-failures**: Added a Valkey-backed user login failure provider with atomic counter updates, configurable namespaces, and embedded Valkey tests validating TTL and clearing semantics.
