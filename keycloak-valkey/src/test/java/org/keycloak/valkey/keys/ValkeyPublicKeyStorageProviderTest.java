@@ -28,6 +28,7 @@ import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.KeycloakTransaction;
 import org.keycloak.models.KeycloakTransactionManager;
 import org.keycloak.valkey.testing.MapBackedConfigScope;
+import org.keycloak.valkey.cluster.ValkeyClusterProviderFactory;
 import org.mockito.Mockito;
 
 class ValkeyPublicKeyStorageProviderTest {
@@ -51,7 +52,9 @@ class ValkeyPublicKeyStorageProviderTest {
         cluster = new StubClusterProvider();
         txManager = new StubTransactionManager();
         session = Mockito.mock(KeycloakSession.class);
-        Mockito.when(session.getProvider(Mockito.eq(ClusterProvider.class))).thenReturn(cluster);
+        Mockito.when(session.getProvider(Mockito.eq(ClusterProvider.class))).thenReturn(null);
+        Mockito.when(session.getProvider(Mockito.eq(ClusterProvider.class),
+                Mockito.eq(ValkeyClusterProviderFactory.PROVIDER_ID))).thenReturn(cluster);
         Mockito.when(session.getTransactionManager()).thenReturn(txManager);
         KeycloakSessionFactory sessionFactory = Mockito.mock(KeycloakSessionFactory.class);
         Mockito.when(session.getKeycloakSessionFactory()).thenReturn(sessionFactory);

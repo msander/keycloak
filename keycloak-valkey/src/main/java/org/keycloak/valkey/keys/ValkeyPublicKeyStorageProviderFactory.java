@@ -6,12 +6,12 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.jboss.logging.Logger;
 import org.keycloak.Config;
 import org.keycloak.cluster.ClusterEvent;
 import org.keycloak.cluster.ClusterListener;
-import org.keycloak.cluster.ClusterProvider;
 import org.keycloak.keys.PublicKeyStorageProvider;
 import org.keycloak.keys.PublicKeyStorageProviderFactory;
 import org.keycloak.keys.PublicKeyStorageUtils;
@@ -23,6 +23,7 @@ import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.provider.ProviderConfigurationBuilder;
 import org.keycloak.provider.ProviderEvent;
 import org.keycloak.provider.ProviderEventListener;
+import org.keycloak.valkey.cluster.ValkeyClusterProviderResolver;
 
 /**
  * Factory for the Valkey-backed public key storage provider.
@@ -38,6 +39,7 @@ public class ValkeyPublicKeyStorageProviderFactory implements PublicKeyStoragePr
     private static final ConcurrentMap<String, CompletableFuture<ValkeyPublicKeysEntry>> TASKS = new ConcurrentHashMap<>();
 
     private volatile boolean listenersRegistered;
+    private final AtomicBoolean clusterUnavailableLogged = new AtomicBoolean();
     private int minTimeBetweenRequests;
     private int maxCacheTime;
 
@@ -114,9 +116,9 @@ public class ValkeyPublicKeyStorageProviderFactory implements PublicKeyStoragePr
             if (listenersRegistered) {
                 return;
             }
-            ClusterProvider cluster = session.getProvider(ClusterProvider.class);
+            var cluster = ValkeyClusterProviderResolver.resolve(session, clusterUnavailableLogged);
             if (cluster == null) {
-                throw new IllegalStateException("ClusterProvider must be available for Valkey public key storage");
+                return;
             }
             cluster.registerListener(PUBLIC_KEY_STORAGE_INVALIDATION_EVENT, new ClusterListener() {
                 @Override

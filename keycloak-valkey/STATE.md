@@ -20,6 +20,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - User session provider persists online and offline user sessions together with client sessions in Valkey hashes, enforcing realm lifespans/idle timeouts via TTL and optimistic transactions.
 - User session persister stores durable online and offline sessions plus client session metadata in Valkey with query indexes for counts, pagination, and expiry management.
 - Public key cache now uses a Valkey-aware storage provider with cluster invalidation events, local cache clearing hooks, and Valkey-native event serializers that avoid Protostream dependencies.
+- Public key storage and cache factories now resolve the Valkey-backed cluster provider and only skip listener registration when it is truly unavailable, keeping Valkey-based clusters functional without Infinispan.
 - Certificate revocation list cache and storage providers back CRL resolution with Valkey, exposing namespace configuration and respecting TTL/min-refresh policies.
 - Workflow state provider stores scheduled workflow steps in Valkey hashes with sorted-set indexes to support due-step scans and indexed lookups, backed by embedded Valkey tests.
 - Devcontainer configuration and local runtime orchestration script enable reproducible Valkey + dual-Keycloak test setups with shared Postgres storage while keeping caches local (no Infinispan clustering).
@@ -168,6 +169,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 
 ## Change Log
 - **v0.8.19-devstack-foreground**: Updated the development Docker stack helper to run in the foreground and automatically tear down the stack when a Keycloak node exits with an error.
+- **v0.8.22-cluster-resolution**: Resolved public key cache/storage listeners through the Valkey cluster provider and retained graceful degradation only when clustering is disabled, supporting Keycloak clusters that rely on Valkey instead of Infinispan.
 - **v0.8.20-datastore-priority**: Ensured the Valkey datastore provider exposes a positive SPI order so Keycloak selects it as the default when the extension is installed, avoiding null datastore providers at runtime and covering the behaviour with a unit test.
 - **v0.8.14-build-flexibility**: Added a standalone POM and CI workflow so the extension can package against arbitrary upstream Keycloak releases while default builds continue to use the repository parent.
 - **v0.8.15-devtooling**: Added devcontainer configuration plus Docker Compose tooling for spinning up Valkey with two Keycloak nodes sharing a Postgres database and Valkey-backed providers without Infinispan clustering.
