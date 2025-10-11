@@ -9,7 +9,9 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
  - Embedded Valkey test harness ensures integration tests can run without Docker/Testcontainers; initial connection-provider tests exercise string and binary command paths.
  - Connection factory now reports sanitised configuration details and live health diagnostics via `ServerInfoAwareProviderFactory`.
 - Cluster provider delivers distributed lock semantics backed by Valkey with pub/sub propagation for cross-node listener notifications, including multi-site filtering and resilient message decoding while remaining agnostic of Infinispan-specific event classes. Work completion events now unblock asynchronous executions without resorting to long polling.
+- Cluster event codec now serializes user storage sync notifications so periodic federation jobs stay aligned across nodes without Protostream, capturing the component model metadata required to rebuild `UserStorageProviderModel` instances on the receiving side.
 - DB lock provider integrates the global database lock SPI with Valkey, supporting forced unlock semantics and configurable retry/lease controls. Micrometer instrumentation captures acquisition latency, hold durations, and release failures for operational visibility.
+- Governance rules now explicitly confine development to the `keycloak-valkey/` module; proposed features that require edits elsewhere must be re-scoped or deferred.
 - Datastore provider factory now wraps the default store managers to prefer Valkey-backed providers and validates prerequisite Valkey infrastructure.
 - Single-use object provider backed by Valkey stores distributed action tokens with atomic removal semantics and optional revoked-token persistence.
 - User login failure provider persists brute-force counters in Valkey hashes with monotonic updates and TTL enforcement aligned with realm policies.
@@ -156,6 +158,8 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Evaluate deterministic seed data and concurrency scenarios to ensure session consistency during failover.
 
 ## Change Log
+- **v0.8.13-module-boundary**: Documented the module boundary policy that forbids editing files outside `keycloak-valkey/` and aligned contributor guidelines accordingly.
+- **v0.8.12-user-storage-events**: Added JSON-based serializer for user storage provider cluster events to keep federation sync schedules consistent across Valkey-backed clusters, capturing component configuration so storage providers can be rehydrated without Protostream, and extended codec tests.
 - **v0.8.11-cluster-metrics**: Added Micrometer-backed metrics facade, instrumented cluster and DB lock providers, introduced Valkey work-completion events to unblock async execution, documented pub/sub configuration, and published the component diagram.
 - **v0.8.10-crl-storage**: Introduced Valkey-backed CRL storage and cache providers with Valkey persistence, TTL enforcement, and embedded tests.
 - **v0.8.9-workflow-state**: Added a Valkey workflow state provider that maintains sorted-set indexes for due step scheduling with comprehensive embedded Valkey tests.
