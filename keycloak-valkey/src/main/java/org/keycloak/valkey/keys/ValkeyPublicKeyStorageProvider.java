@@ -15,7 +15,6 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import org.jboss.logging.Logger;
-import org.keycloak.cluster.ClusterProvider;
 import org.keycloak.common.util.Time;
 import org.keycloak.crypto.KeyWrapper;
 import org.keycloak.crypto.PublicKeysWrapper;
@@ -24,6 +23,7 @@ import org.keycloak.keys.PublicKeyStorageProvider;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakTransaction;
 import org.keycloak.models.KeycloakTransactionManager;
+import org.keycloak.valkey.cluster.ValkeyClusterProviderResolver;
 
 /**
  * Public key storage provider backed by an in-memory cache with Valkey-based invalidations.
@@ -176,7 +176,7 @@ final class ValkeyPublicKeyStorageProvider implements PublicKeyStorageProvider {
         }
 
         targets.forEach(cache::remove);
-        ClusterProvider cluster = session.getProvider(ClusterProvider.class);
+        var cluster = ValkeyClusterProviderResolver.resolve(session, null);
         if (cluster != null) {
             List<ValkeyPublicKeyInvalidationEvent> events = targets.stream()
                     .map(ValkeyPublicKeyInvalidationEvent::create)

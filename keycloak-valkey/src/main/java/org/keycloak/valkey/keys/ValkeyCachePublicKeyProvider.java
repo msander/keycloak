@@ -2,9 +2,9 @@ package org.keycloak.valkey.keys;
 
 import java.util.concurrent.ConcurrentMap;
 
-import org.keycloak.cluster.ClusterProvider;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.cache.CachePublicKeyProvider;
+import org.keycloak.valkey.cluster.ValkeyClusterProviderResolver;
 
 /**
  * Cache facade clearing entries from the shared public key cache and propagating cluster events.
@@ -22,7 +22,7 @@ final class ValkeyCachePublicKeyProvider implements CachePublicKeyProvider {
     @Override
     public void clearCache() {
         cache.clear();
-        ClusterProvider cluster = session.getProvider(ClusterProvider.class);
+        var cluster = ValkeyClusterProviderResolver.resolve(session, null);
         if (cluster != null) {
             cluster.notify(ValkeyPublicKeyStorageProviderFactory.KEYS_CLEAR_CACHE_EVENT,
                     ValkeyClearCacheEvent.getInstance(), true);

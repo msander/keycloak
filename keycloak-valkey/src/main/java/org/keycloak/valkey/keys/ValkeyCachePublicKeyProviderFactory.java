@@ -1,15 +1,16 @@
 package org.keycloak.valkey.keys;
 
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.keycloak.Config;
 import org.keycloak.cluster.ClusterEvent;
 import org.keycloak.cluster.ClusterListener;
-import org.keycloak.cluster.ClusterProvider;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.cache.CachePublicKeyProvider;
 import org.keycloak.models.cache.CachePublicKeyProviderFactory;
+import org.keycloak.valkey.cluster.ValkeyClusterProviderResolver;
 
 /**
  * Factory producing cache accessors for the Valkey public key cache.
@@ -19,6 +20,7 @@ public class ValkeyCachePublicKeyProviderFactory implements CachePublicKeyProvid
     public static final String PROVIDER_ID = "valkey";
 
     private volatile boolean listenersRegistered;
+    private final AtomicBoolean clusterUnavailableLogged = new AtomicBoolean();
 
     @Override
     public CachePublicKeyProvider create(KeycloakSession session) {
@@ -53,9 +55,9 @@ public class ValkeyCachePublicKeyProviderFactory implements CachePublicKeyProvid
             if (listenersRegistered) {
                 return;
             }
-            ClusterProvider cluster = session.getProvider(ClusterProvider.class);
+            var cluster = ValkeyClusterProviderResolver.resolve(session, clusterUnavailableLogged);
             if (cluster == null) {
-                throw new IllegalStateException("ClusterProvider must be available for Valkey public key cache");
+                return;
             }
             cluster.registerListener(ValkeyPublicKeyStorageProviderFactory.KEYS_CLEAR_CACHE_EVENT, new ClusterListener() {
                 @Override
