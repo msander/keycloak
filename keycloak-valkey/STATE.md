@@ -21,6 +21,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Public key cache now uses a Valkey-aware storage provider with cluster invalidation events, local cache clearing hooks, and Valkey-native event serializers that avoid Protostream dependencies.
 - Certificate revocation list cache and storage providers back CRL resolution with Valkey, exposing namespace configuration and respecting TTL/min-refresh policies.
 - Workflow state provider stores scheduled workflow steps in Valkey hashes with sorted-set indexes to support due-step scans and indexed lookups, backed by embedded Valkey tests.
+- Devcontainer configuration and local runtime orchestration script enable reproducible Valkey + dual-Keycloak test setups with shared Postgres storage while keeping caches local (no Infinispan clustering).
 
 ## Architectural Assumptions
 1. All clustering/storage touch points (distributed caches, action tokens, work cache, authorization, user sessions, offline sessions, login failures, clients, authentication sessions) will be integrated through dedicated SPI implementations (e.g., `UserSessionProvider`, `AuthenticationSessionProvider`, `UserLoginFailureProvider`) and existing extension hooks without relying on the deprecated Map Storage architecture.
@@ -153,12 +154,18 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - [x] Derive reusable metrics facade (Micrometer integration) for downstream providers.
 - [x] Evaluate adaptive lock lease tuning and observability for the DB lock provider (latency metrics, failure alarms).
 
+## Developer Tooling
+- `.devcontainer/devcontainer.json` provisions a Java 21 + Maven workspace with Docker-in-Docker support and automatically packages the Valkey module for local testing workflows.
+- `dev-support/run-valkey-stack.sh` builds the module (unless skipped) and starts a Docker Compose stack with Valkey, Postgres, and two Keycloak nodes consuming the Valkey providers from the shared providers directory.
+- `dev-support/docker-compose.valkey.yml` defines the stack using shared Postgres state and local cache mode to avoid Infinispan clustering while exercising the Valkey-backed providers.
+
 ## Testing Notes
 - Goal is to run `mvn -pl keycloak-valkey test` without external services. Embedded server must start on random free port and clean up after tests.
 - Evaluate deterministic seed data and concurrency scenarios to ensure session consistency during failover.
 
 ## Change Log
 - **v0.8.14-build-flexibility**: Added a standalone POM and CI workflow so the extension can package against arbitrary upstream Keycloak releases while default builds continue to use the repository parent.
+- **v0.8.15-devtooling**: Added devcontainer configuration plus Docker Compose tooling for spinning up Valkey with two Keycloak nodes sharing a Postgres database and Valkey-backed providers without Infinispan clustering.
 - **v0.8.13-module-boundary**: Documented the module boundary policy that forbids editing files outside `keycloak-valkey/` and aligned contributor guidelines accordingly.
 - **v0.8.12-user-storage-events**: Added JSON-based serializer for user storage provider cluster events to keep federation sync schedules consistent across Valkey-backed clusters, capturing component configuration so storage providers can be rehydrated without Protostream, and extended codec tests.
 - **v0.8.11-cluster-metrics**: Added Micrometer-backed metrics facade, instrumented cluster and DB lock providers, introduced Valkey work-completion events to unblock async execution, documented pub/sub configuration, and published the component diagram.
