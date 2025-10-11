@@ -24,6 +24,11 @@ public class ValkeyDatastoreProviderFactory extends DefaultDatastoreProviderFact
         return new ValkeyDatastoreProvider(this, session);
     }
 
+    @Override
+    public int order() {
+        return 100;
+    }
+
     private void ensureValkeyInfrastructure(KeycloakSession session) {
         if (session.getProvider(ValkeyConnectionProvider.class) == null) {
             throw new IllegalStateException("Valkey datastore requires an active Valkey connection provider");
