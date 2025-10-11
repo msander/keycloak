@@ -2,3 +2,4 @@ org.keycloak.valkey.keys.ValkeyPublicKeyInvalidationEventSerializer
 org.keycloak.valkey.keys.ValkeyClearCacheEventSerializer
 org.keycloak.valkey.cluster.ValkeyWorkCompletionEventSerializer
 org.keycloak.valkey.cluster.UserStorageProviderClusterEventSerializer
+org.keycloak.valkey.cluster.ValkeyInvalidationEventSerializer
