@@ -46,6 +46,8 @@ services:
       KC_SPI_CONNECTIONS_VALKEY_PROVIDER: lettuce
       KC_SPI_CONNECTIONS_VALKEY_LETTUCE_URI: redis://valkey:6379
       KC_SPI_CONNECTIONS_VALKEY_LETTUCE_CLIENT_NAME: keycloak-primary
+      # Force component factory caching in single-node mode to avoid cluster warnings.
+      KC_SPI_COMPONENT_FACTORY_PROVIDER_DEFAULT_CACHING_FORCED: "true"
     volumes:
       - ./runtime/providers:/opt/keycloak/providers:rw
     depends_on:
@@ -75,6 +77,8 @@ services:
       KC_SPI_CONNECTIONS_VALKEY_PROVIDER: lettuce
       KC_SPI_CONNECTIONS_VALKEY_LETTUCE_URI: redis://valkey:6379
       KC_SPI_CONNECTIONS_VALKEY_LETTUCE_CLIENT_NAME: keycloak-secondary
+      # Force component factory caching in single-node mode to avoid cluster warnings.
+      KC_SPI_COMPONENT_FACTORY_PROVIDER_DEFAULT_CACHING_FORCED: "true"
     volumes:
       - ./runtime/providers:/opt/keycloak/providers:rw
     depends_on:

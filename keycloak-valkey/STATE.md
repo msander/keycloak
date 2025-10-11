@@ -13,7 +13,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Cluster event codec now serializes user storage sync notifications so periodic federation jobs stay aligned across nodes without Protostream, capturing the component model metadata required to rebuild `UserStorageProviderModel` instances on the receiving side.
 - DB lock provider integrates the global database lock SPI with Valkey, supporting forced unlock semantics and configurable retry/lease controls. Micrometer instrumentation captures acquisition latency, hold durations, and release failures for operational visibility.
 - Governance rules now explicitly confine development to the `keycloak-valkey/` module; proposed features that require edits elsewhere must be re-scoped or deferred.
-- Datastore provider factory now wraps the default store managers to prefer Valkey-backed providers and validates prerequisite Valkey infrastructure.
+- Datastore provider factory now subclasses the default store managers to prefer Valkey-backed providers, maintains migration compatibility, and validates prerequisite Valkey infrastructure.
 - Single-use object provider backed by Valkey stores distributed action tokens with atomic removal semantics and optional revoked-token persistence.
 - User login failure provider persists brute-force counters in Valkey hashes with monotonic updates and TTL enforcement aligned with realm policies.
 - Authentication session provider stores root sessions and per-tab authentication state in Valkey hashes with optimistic updates and TTL derived from realm lifespans.
@@ -23,6 +23,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Certificate revocation list cache and storage providers back CRL resolution with Valkey, exposing namespace configuration and respecting TTL/min-refresh policies.
 - Workflow state provider stores scheduled workflow steps in Valkey hashes with sorted-set indexes to support due-step scans and indexed lookups, backed by embedded Valkey tests.
 - Devcontainer configuration and local runtime orchestration script enable reproducible Valkey + dual-Keycloak test setups with shared Postgres storage while keeping caches local (no Infinispan clustering).
+- Development stack now forces component factory caching for single-node Valkey deployments to silence cluster warnings while keeping component lookups cached.
 
 ## Architectural Assumptions
 1. All clustering/storage touch points (distributed caches, action tokens, work cache, authorization, user sessions, offline sessions, login failures, clients, authentication sessions) will be integrated through dedicated SPI implementations (e.g., `UserSessionProvider`, `AuthenticationSessionProvider`, `UserLoginFailureProvider`) and existing extension hooks without relying on the deprecated Map Storage architecture.
@@ -167,6 +168,8 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 ## Change Log
 - **v0.8.14-build-flexibility**: Added a standalone POM and CI workflow so the extension can package against arbitrary upstream Keycloak releases while default builds continue to use the repository parent.
 - **v0.8.15-devtooling**: Added devcontainer configuration plus Docker Compose tooling for spinning up Valkey with two Keycloak nodes sharing a Postgres database and Valkey-backed providers without Infinispan clustering.
+- **v0.8.17-datastore-compat**: Updated the Valkey datastore provider to extend the default Keycloak datastore for migration compatibility while still preferring Valkey-backed SPI implementations and refreshed the associated tests.
+- **v0.8.18-single-node-caching**: Forced component factory caching in the dev stack so single-node deployments avoid cluster warnings and retain cached component factories when using the Valkey extension.
 - **v0.8.16-runtime-bundle**: Shaded the Lettuce client into the extension artifact to keep Valkey SPI loading functional on standalone Keycloak runtimes (e.g. 26.4.0) without extra classpath setup.
 - **v0.8.13-module-boundary**: Documented the module boundary policy that forbids editing files outside `keycloak-valkey/` and aligned contributor guidelines accordingly.
 - **v0.8.12-user-storage-events**: Added JSON-based serializer for user storage provider cluster events to keep federation sync schedules consistent across Valkey-backed clusters, capturing component configuration so storage providers can be rehydrated without Protostream, and extended codec tests.

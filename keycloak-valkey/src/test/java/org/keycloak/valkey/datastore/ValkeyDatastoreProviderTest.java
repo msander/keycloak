@@ -5,9 +5,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.keycloak.models.ClientProvider;
 import org.keycloak.models.ClientScopeProvider;
@@ -21,90 +22,89 @@ import org.keycloak.models.UserLoginFailureProvider;
 import org.keycloak.models.UserProvider;
 import org.keycloak.models.UserSessionProvider;
 import org.keycloak.sessions.AuthenticationSessionProvider;
-import org.keycloak.storage.datastore.DefaultDatastoreProvider;
+import org.keycloak.storage.datastore.DefaultDatastoreProviderFactory;
 
 class ValkeyDatastoreProviderTest {
 
-    private final KeycloakSession session = mock(KeycloakSession.class);
-    private final DefaultDatastoreProvider delegate = mock(DefaultDatastoreProvider.class);
-    private final ValkeyDatastoreProvider provider = new ValkeyDatastoreProvider(delegate, session);
+    private KeycloakSession session;
+    private ValkeyDatastoreProvider provider;
 
-    @Test
-    void prefersValkeyProvidersWhenAvailable() {
-        AuthenticationSessionProvider authProvider = mock(AuthenticationSessionProvider.class);
-        when(session.getProvider(eq(AuthenticationSessionProvider.class), eq(ValkeyDatastoreProviderFactory.PROVIDER_ID)))
-                .thenReturn(authProvider);
-
-        assertSame(authProvider, provider.authSessions());
-        verifyNoInteractions(delegate);
+    @BeforeEach
+    void setUp() {
+        session = mock(KeycloakSession.class);
+        provider = new ValkeyDatastoreProvider(new DefaultDatastoreProviderFactory(), session);
     }
 
     @Test
-    void fallsBackToDelegateWhenValkeyProviderMissing() {
+    void prefersValkeyProvidersWhenAvailable() {
+        AuthenticationSessionProvider valkeyProvider = mock(AuthenticationSessionProvider.class);
+        when(session.getProvider(eq(AuthenticationSessionProvider.class),
+                eq(ValkeyDatastoreProviderFactory.PROVIDER_ID))).thenReturn(valkeyProvider);
+
         AuthenticationSessionProvider fallback = mock(AuthenticationSessionProvider.class);
-        when(delegate.authSessions()).thenReturn(fallback);
+        when(session.getProvider(AuthenticationSessionProvider.class)).thenReturn(fallback);
+
+        assertSame(valkeyProvider, provider.authSessions());
+        verify(session, times(1)).getProvider(eq(AuthenticationSessionProvider.class),
+                eq(ValkeyDatastoreProviderFactory.PROVIDER_ID));
+        verify(session, times(0)).getProvider(AuthenticationSessionProvider.class);
+        verifyNoMoreInteractions(session);
+    }
+
+    @Test
+    void fallsBackToDefaultWhenValkeyProviderMissing() {
+        when(session.getProvider(eq(AuthenticationSessionProvider.class),
+                eq(ValkeyDatastoreProviderFactory.PROVIDER_ID))).thenReturn(null);
+
+        AuthenticationSessionProvider fallback = mock(AuthenticationSessionProvider.class);
+        when(session.getProvider(AuthenticationSessionProvider.class)).thenReturn(fallback);
 
         assertSame(fallback, provider.authSessions());
-        verify(delegate, times(1)).authSessions();
+        verify(session, times(1)).getProvider(eq(AuthenticationSessionProvider.class),
+                eq(ValkeyDatastoreProviderFactory.PROVIDER_ID));
+        verify(session, times(1)).getProvider(AuthenticationSessionProvider.class);
+        verifyNoMoreInteractions(session);
     }
 
     @Test
     void cachesResolvedProviders() {
+        when(session.getProvider(eq(AuthenticationSessionProvider.class),
+                eq(ValkeyDatastoreProviderFactory.PROVIDER_ID))).thenReturn(null);
         AuthenticationSessionProvider fallback = mock(AuthenticationSessionProvider.class);
-        when(delegate.authSessions()).thenReturn(fallback);
+        when(session.getProvider(AuthenticationSessionProvider.class)).thenReturn(fallback);
 
         provider.authSessions();
         provider.authSessions();
 
-        verify(delegate, times(1)).authSessions();
+        verify(session, times(1)).getProvider(eq(AuthenticationSessionProvider.class),
+                eq(ValkeyDatastoreProviderFactory.PROVIDER_ID));
+        verify(session, times(1)).getProvider(AuthenticationSessionProvider.class);
+        verifyNoMoreInteractions(session);
     }
 
     @Test
     void clearsOverridesOnClose() {
-        AuthenticationSessionProvider valkeyAuth = mock(AuthenticationSessionProvider.class);
-        when(session.getProvider(eq(AuthenticationSessionProvider.class), eq(ValkeyDatastoreProviderFactory.PROVIDER_ID)))
-                .thenReturn(valkeyAuth);
-        provider.authSessions();
+        AuthenticationSessionProvider valkeyProvider = mock(AuthenticationSessionProvider.class);
+        when(session.getProvider(eq(AuthenticationSessionProvider.class),
+                eq(ValkeyDatastoreProviderFactory.PROVIDER_ID))).thenReturn(valkeyProvider);
 
+        provider.authSessions();
         provider.close();
 
         AuthenticationSessionProvider fallback = mock(AuthenticationSessionProvider.class);
-        when(session.getProvider(eq(AuthenticationSessionProvider.class), eq(ValkeyDatastoreProviderFactory.PROVIDER_ID)))
-                .thenReturn(null);
-        when(delegate.authSessions()).thenReturn(fallback);
+        when(session.getProvider(eq(AuthenticationSessionProvider.class),
+                eq(ValkeyDatastoreProviderFactory.PROVIDER_ID))).thenReturn(null);
+        when(session.getProvider(AuthenticationSessionProvider.class)).thenReturn(fallback);
 
         assertSame(fallback, provider.authSessions());
+        verify(session, times(2)).getProvider(eq(AuthenticationSessionProvider.class),
+                eq(ValkeyDatastoreProviderFactory.PROVIDER_ID));
+        verify(session, times(1)).getProvider(AuthenticationSessionProvider.class);
+        verifyNoMoreInteractions(session);
     }
 
     @Test
-    void delegatesStoreManagerAccessors() {
-        ClientProvider clientProvider = mock(ClientProvider.class);
-        ClientScopeProvider clientScopeProvider = mock(ClientScopeProvider.class);
-        RoleProvider roleProvider = mock(RoleProvider.class);
-        GroupProvider groupProvider = mock(GroupProvider.class);
-        UserProvider userProvider = mock(UserProvider.class);
-        org.keycloak.storage.federated.UserFederatedStorageProvider federated =
-                mock(org.keycloak.storage.federated.UserFederatedStorageProvider.class);
-
-        when(delegate.clientStorageManager()).thenReturn(clientProvider);
-        when(delegate.clientScopeStorageManager()).thenReturn(clientScopeProvider);
-        when(delegate.roleStorageManager()).thenReturn(roleProvider);
-        when(delegate.groupStorageManager()).thenReturn(groupProvider);
-        when(delegate.userStorageManager()).thenReturn(userProvider);
-        when(delegate.userLocalStorage()).thenReturn(userProvider);
-        when(delegate.userFederatedStorage()).thenReturn(federated);
-
-        assertSame(clientProvider, provider.clientStorageManager());
-        assertSame(clientScopeProvider, provider.clientScopeStorageManager());
-        assertSame(roleProvider, provider.roleStorageManager());
-        assertSame(groupProvider, provider.groupStorageManager());
-        assertSame(userProvider, provider.userStorageManager());
-        assertSame(userProvider, provider.userLocalStorage());
-        assertSame(federated, provider.userFederatedStorage());
-    }
-
-    @Test
-    void prefersValkeyForAllCoreProviders() {
+    void prefersValkeyForCoreProviders() {
         ClientProvider clientProvider = mock(ClientProvider.class);
         ClientScopeProvider clientScopeProvider = mock(ClientScopeProvider.class);
         GroupProvider groupProvider = mock(GroupProvider.class);
@@ -122,8 +122,8 @@ class ValkeyDatastoreProviderTest {
                 .thenReturn(clientScopeProvider);
         when(session.getProvider(eq(GroupProvider.class), eq(ValkeyDatastoreProviderFactory.PROVIDER_ID)))
                 .thenReturn(groupProvider);
-        when(session.getProvider(eq(IdentityProviderStorageProvider.class), eq(ValkeyDatastoreProviderFactory.PROVIDER_ID)))
-                .thenReturn(idpProvider);
+        when(session.getProvider(eq(IdentityProviderStorageProvider.class),
+                eq(ValkeyDatastoreProviderFactory.PROVIDER_ID))).thenReturn(idpProvider);
         when(session.getProvider(eq(UserLoginFailureProvider.class), eq(ValkeyDatastoreProviderFactory.PROVIDER_ID)))
                 .thenReturn(loginFailureProvider);
         when(session.getProvider(eq(RealmProvider.class), eq(ValkeyDatastoreProviderFactory.PROVIDER_ID)))

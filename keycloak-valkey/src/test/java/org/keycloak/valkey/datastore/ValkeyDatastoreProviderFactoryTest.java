@@ -3,8 +3,8 @@ package org.keycloak.valkey.datastore;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -15,6 +15,7 @@ import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.dblock.DBLockProvider;
 import org.keycloak.provider.ProviderFactory;
 import org.keycloak.storage.DatastoreProvider;
+import org.keycloak.storage.datastore.DefaultDatastoreProvider;
 import org.keycloak.valkey.ValkeyConnectionProvider;
 import org.keycloak.valkey.cluster.ValkeyClusterProviderFactory;
 import org.keycloak.valkey.dblock.ValkeyDBLockProviderFactory;
@@ -73,6 +74,7 @@ class ValkeyDatastoreProviderFactoryTest {
 
         DatastoreProvider provider = factory.create(session);
         assertTrue(provider instanceof ValkeyDatastoreProvider);
+        assertTrue(provider instanceof DefaultDatastoreProvider);
     }
 
     @Test

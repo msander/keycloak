@@ -18,133 +18,91 @@ import org.keycloak.models.UserProvider;
 import org.keycloak.models.UserSessionProvider;
 import org.keycloak.provider.Provider;
 import org.keycloak.sessions.AuthenticationSessionProvider;
-import org.keycloak.storage.DatastoreProvider;
-import org.keycloak.storage.ExportImportManager;
-import org.keycloak.storage.StoreManagers;
 import org.keycloak.storage.datastore.DefaultDatastoreProvider;
+import org.keycloak.storage.datastore.DefaultDatastoreProviderFactory;
 
 /**
- * Wrapper around the default datastore provider that prefers Valkey-backed implementations when present.
+ * {@link DefaultDatastoreProvider} variant that prefers Valkey-backed implementations when present.
  */
-final class ValkeyDatastoreProvider implements DatastoreProvider, StoreManagers {
+final class ValkeyDatastoreProvider extends DefaultDatastoreProvider {
 
-    private final DefaultDatastoreProvider delegate;
     private final KeycloakSession session;
-    private final ConcurrentMap<Class<?>, Object> overrides = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Class<?>, Provider> overrides = new ConcurrentHashMap<>();
 
-    ValkeyDatastoreProvider(DefaultDatastoreProvider delegate, KeycloakSession session) {
-        this.delegate = Objects.requireNonNull(delegate, "delegate");
-        this.session = Objects.requireNonNull(session, "session");
+    ValkeyDatastoreProvider(DefaultDatastoreProviderFactory factory, KeycloakSession session) {
+        super(Objects.requireNonNull(factory, "factory"), Objects.requireNonNull(session, "session"));
+        this.session = session;
     }
 
     @Override
     public AuthenticationSessionProvider authSessions() {
-        return prefer(AuthenticationSessionProvider.class, delegate::authSessions);
+        return prefer(AuthenticationSessionProvider.class, super::authSessions);
     }
 
     @Override
     public ClientScopeProvider clientScopes() {
-        return prefer(ClientScopeProvider.class, delegate::clientScopes);
+        return prefer(ClientScopeProvider.class, super::clientScopes);
     }
 
     @Override
     public ClientProvider clients() {
-        return prefer(ClientProvider.class, delegate::clients);
+        return prefer(ClientProvider.class, super::clients);
     }
 
     @Override
     public GroupProvider groups() {
-        return prefer(GroupProvider.class, delegate::groups);
+        return prefer(GroupProvider.class, super::groups);
     }
 
     @Override
     public IdentityProviderStorageProvider identityProviders() {
-        return prefer(IdentityProviderStorageProvider.class, delegate::identityProviders);
+        return prefer(IdentityProviderStorageProvider.class, super::identityProviders);
     }
 
     @Override
     public UserLoginFailureProvider loginFailures() {
-        return prefer(UserLoginFailureProvider.class, delegate::loginFailures);
+        return prefer(UserLoginFailureProvider.class, super::loginFailures);
     }
 
     @Override
     public RealmProvider realms() {
-        return prefer(RealmProvider.class, delegate::realms);
+        return prefer(RealmProvider.class, super::realms);
     }
 
     @Override
     public RoleProvider roles() {
-        return prefer(RoleProvider.class, delegate::roles);
+        return prefer(RoleProvider.class, super::roles);
     }
 
     @Override
     public SingleUseObjectProvider singleUseObjects() {
-        return prefer(SingleUseObjectProvider.class, delegate::singleUseObjects);
+        return prefer(SingleUseObjectProvider.class, super::singleUseObjects);
     }
 
     @Override
     public UserProvider users() {
-        return prefer(UserProvider.class, delegate::users);
+        return prefer(UserProvider.class, super::users);
     }
 
     @Override
     public UserSessionProvider userSessions() {
-        return prefer(UserSessionProvider.class, delegate::userSessions);
-    }
-
-    @Override
-    public ExportImportManager getExportImportManager() {
-        return delegate.getExportImportManager();
-    }
-
-    @Override
-    public ClientProvider clientStorageManager() {
-        return delegate.clientStorageManager();
-    }
-
-    @Override
-    public ClientScopeProvider clientScopeStorageManager() {
-        return delegate.clientScopeStorageManager();
-    }
-
-    @Override
-    public RoleProvider roleStorageManager() {
-        return delegate.roleStorageManager();
-    }
-
-    @Override
-    public GroupProvider groupStorageManager() {
-        return delegate.groupStorageManager();
-    }
-
-    @Override
-    public UserProvider userStorageManager() {
-        return delegate.userStorageManager();
-    }
-
-    @Override
-    public UserProvider userLocalStorage() {
-        return delegate.userLocalStorage();
-    }
-
-    @Override
-    public org.keycloak.storage.federated.UserFederatedStorageProvider userFederatedStorage() {
-        return delegate.userFederatedStorage();
+        return prefer(UserSessionProvider.class, super::userSessions);
     }
 
     @Override
     public void close() {
         overrides.clear();
-        delegate.close();
+        super.close();
     }
 
     @SuppressWarnings("unchecked")
     private <T extends Provider> T prefer(Class<T> providerClass, Supplier<T> fallback) {
-        Object existing = overrides.get(providerClass);
-        if (existing != null) {
-            return (T) existing;
+        Provider cached = overrides.get(providerClass);
+        if (cached != null) {
+            return (T) cached;
         }
-        Object resolved = overrides.computeIfAbsent(providerClass, key -> {
+
+        Provider resolved = overrides.computeIfAbsent(providerClass, key -> {
             T valkeyProvider = session.getProvider(providerClass, ValkeyDatastoreProviderFactory.PROVIDER_ID);
             if (valkeyProvider != null) {
                 return valkeyProvider;
@@ -155,6 +113,7 @@ final class ValkeyDatastoreProvider implements DatastoreProvider, StoreManagers 
             }
             return fallbackProvider;
         });
+
         return (T) resolved;
     }
 }
