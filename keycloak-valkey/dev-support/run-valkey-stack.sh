@@ -120,13 +120,13 @@ http_probe() {
     esac
 }
 
-keycloak_service_port() {
+keycloak_health_port() {
     case "$1" in
         keycloak-primary)
-            echo 8080
+            echo 9000
             ;;
         keycloak-secondary)
-            echo 8081
+            echo 9001
             ;;
         *)
             echo "" && return 1
@@ -173,7 +173,7 @@ wait_for_keycloak_ready() {
     local service="$1"
     local timeout="${2:-240}"
     local port
-    port=$(keycloak_service_port "${service}") || return 1
+    port=$(keycloak_health_port "${service}") || return 1
 
     ensure_http_client
 
@@ -199,7 +199,7 @@ wait_for_keycloak_ready() {
         fi
 
         if http_probe "http://localhost:${port}/health/ready"; then
-            echo "Keycloak service '${service}' is ready at http://localhost:${port}."
+            echo "Keycloak service '${service}' reported ready via http://localhost:${port}/health/ready."
             return 0
         fi
 
