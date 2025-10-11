@@ -7,13 +7,14 @@ COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.valkey.yml"
 RUNTIME_DIR="${SCRIPT_DIR}/runtime"
 PROVIDERS_DIR="${RUNTIME_DIR}/providers"
 PROJECT_NAME="keycloak-valkey"
+KEYCLOAK_SERVICES=(keycloak-primary keycloak-secondary)
 
 usage() {
     cat <<USAGE
 Usage: ${0##*/} [command]
 
 Commands:
-  up        Build the Valkey module (unless SKIP_BUILD=1) and start the stack in the background (default).
+  up        Build the Valkey module (unless SKIP_BUILD=1) and start the stack in the foreground (default).
   down      Stop the stack and remove containers.
   logs      Tail the stack logs.
   ps        Show container status.
@@ -68,8 +69,33 @@ cmd_up() {
     build_module
     stage_provider
     ensure_compose_available
-    "${COMPOSE_CMD[@]}" up -d --remove-orphans
-    echo "Valkey + dual Keycloak stack is running. Use '${0##*/} logs' to follow logs."
+    echo "Starting Valkey + dual Keycloak stack in the foreground. Press Ctrl+C to stop."
+
+    set +e
+    "${COMPOSE_CMD[@]}" up --abort-on-container-exit --remove-orphans
+    local up_status=$?
+    set -e
+
+    local exit_code=$up_status
+    for service in "${KEYCLOAK_SERVICES[@]}"; do
+        local container_id
+        container_id=$("${COMPOSE_CMD[@]}" ps -q "${service}" 2>/dev/null || true)
+        if [[ -n "${container_id}" ]]; then
+            local service_exit
+            service_exit=$(docker inspect -f '{{.State.ExitCode}}' "${container_id}" 2>/dev/null || echo 0)
+            if [[ "${service_exit}" != "0" ]]; then
+                echo "Keycloak service '${service}' exited with status ${service_exit}; shutting down the stack." >&2
+                exit_code=${service_exit}
+                break
+            fi
+        fi
+    done
+
+    set +e
+    "${COMPOSE_CMD[@]}" down --remove-orphans >/dev/null 2>&1
+    set -e
+
+    exit "${exit_code}"
 }
 
 cmd_down() {
