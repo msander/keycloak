@@ -1,0 +1,60 @@
+name: Build Valkey Extension
+
+on:
+  push:
+    paths:
+      - 'keycloak-valkey/**'
+      - '.github/workflows/build-valkey-extension.yml'
+  pull_request:
+    paths:
+      - 'keycloak-valkey/**'
+      - '.github/workflows/build-valkey-extension.yml'
+  workflow_dispatch:
+    inputs:
+      keycloak-version:
+        description: 'Keycloak version to build against (e.g. 23.0.7)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KEYCLOAK_VERSION: ${{ github.event.inputs.keycloak-version || '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+
+      - name: Build with repository parent
+        if: env.KEYCLOAK_VERSION == ''
+        run: mvn -B -pl keycloak-valkey -am package
+
+      - name: Build against Keycloak ${{ env.KEYCLOAK_VERSION }}
+        if: env.KEYCLOAK_VERSION != ''
+        working-directory: keycloak-valkey
+        run: mvn -B -f pom-standalone.xml -Dkeycloak.version=${{ env.KEYCLOAK_VERSION }} -Dvalkey.extension.version=${{ env.KEYCLOAK_VERSION }} package
+
+      - name: Determine artifact name
+        id: artifact-meta
+        run: |
+          if [ -z "${KEYCLOAK_VERSION}" ]; then
+            echo "name=keycloak-valkey-snapshot" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=keycloak-valkey-${KEYCLOAK_VERSION}" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          KEYCLOAK_VERSION: ${{ env.KEYCLOAK_VERSION }}
+
+      - name: Upload extension jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact-meta.outputs.name }}
+          path: keycloak-valkey/target/*.jar
+          if-no-files-found: error

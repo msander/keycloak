@@ -158,6 +158,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Evaluate deterministic seed data and concurrency scenarios to ensure session consistency during failover.
 
 ## Change Log
+- **v0.8.14-build-flexibility**: Added a standalone POM and CI workflow so the extension can package against arbitrary upstream Keycloak releases while default builds continue to use the repository parent.
 - **v0.8.13-module-boundary**: Documented the module boundary policy that forbids editing files outside `keycloak-valkey/` and aligned contributor guidelines accordingly.
 - **v0.8.12-user-storage-events**: Added JSON-based serializer for user storage provider cluster events to keep federation sync schedules consistent across Valkey-backed clusters, capturing component configuration so storage providers can be rehydrated without Protostream, and extended codec tests.
 - **v0.8.11-cluster-metrics**: Added Micrometer-backed metrics facade, instrumented cluster and DB lock providers, introduced Valkey work-completion events to unblock async execution, documented pub/sub configuration, and published the component diagram.
