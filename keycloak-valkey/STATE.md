@@ -161,6 +161,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 ## Developer Tooling
 - `.devcontainer/devcontainer.json` provisions a Java 21 + Maven workspace with Docker-in-Docker support and automatically packages the Valkey module for local testing workflows.
 - `dev-support/run-valkey-stack.sh` builds the module (unless skipped) and starts a Docker Compose stack with Valkey, Postgres, and two Keycloak nodes consuming the Valkey providers from the shared providers directory.
+- `dev-support/run-valkey-stack.sh` now starts the Keycloak nodes sequentially, waiting for the primary node to report ready before launching the secondary instance so only one node performs the initial database bootstrap.
 - `dev-support/docker-compose.valkey.yml` defines the stack using shared Postgres state and local cache mode to avoid Infinispan clustering while exercising the Valkey-backed providers.
 
 ## Testing Notes
@@ -168,6 +169,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Evaluate deterministic seed data and concurrency scenarios to ensure session consistency during failover.
 
 ## Change Log
+- **v0.8.25-sequential-bootstrap**: Hardened the development stack helper to launch Keycloak nodes sequentially, add readiness probing, and tear down the stack automatically if either node exits.
 - **v0.8.19-devstack-foreground**: Updated the development Docker stack helper to run in the foreground and automatically tear down the stack when a Keycloak node exits with an error.
 - **v0.8.22-cluster-resolution**: Resolved public key cache/storage listeners through the Valkey cluster provider and retained graceful degradation only when clustering is disabled, supporting Keycloak clusters that rely on Valkey instead of Infinispan.
 - **v0.8.20-datastore-priority**: Ensured the Valkey datastore provider exposes a positive SPI order so Keycloak selects it as the default when the extension is installed, avoiding null datastore providers at runtime and covering the behaviour with a unit test.
