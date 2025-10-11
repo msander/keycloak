@@ -8,6 +8,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Maven module participates in the main reactor and now ships a functional Lettuce-backed `ValkeyConnectionProviderFactory` registered through the Keycloak SPI loader.
  - Embedded Valkey test harness ensures integration tests can run without Docker/Testcontainers; initial connection-provider tests exercise string and binary command paths.
  - Connection factory now reports sanitised configuration details and live health diagnostics via `ServerInfoAwareProviderFactory`.
+- Extension JAR shades the Lettuce client dependencies so standalone Keycloak distributions can load the Valkey SPI without missing classes.
 - Cluster provider delivers distributed lock semantics backed by Valkey with pub/sub propagation for cross-node listener notifications, including multi-site filtering and resilient message decoding while remaining agnostic of Infinispan-specific event classes. Work completion events now unblock asynchronous executions without resorting to long polling.
 - Cluster event codec now serializes user storage sync notifications so periodic federation jobs stay aligned across nodes without Protostream, capturing the component model metadata required to rebuild `UserStorageProviderModel` instances on the receiving side.
 - DB lock provider integrates the global database lock SPI with Valkey, supporting forced unlock semantics and configurable retry/lease controls. Micrometer instrumentation captures acquisition latency, hold durations, and release failures for operational visibility.
@@ -166,6 +167,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 ## Change Log
 - **v0.8.14-build-flexibility**: Added a standalone POM and CI workflow so the extension can package against arbitrary upstream Keycloak releases while default builds continue to use the repository parent.
 - **v0.8.15-devtooling**: Added devcontainer configuration plus Docker Compose tooling for spinning up Valkey with two Keycloak nodes sharing a Postgres database and Valkey-backed providers without Infinispan clustering.
+- **v0.8.16-runtime-bundle**: Shaded the Lettuce client into the extension artifact to keep Valkey SPI loading functional on standalone Keycloak runtimes (e.g. 26.4.0) without extra classpath setup.
 - **v0.8.13-module-boundary**: Documented the module boundary policy that forbids editing files outside `keycloak-valkey/` and aligned contributor guidelines accordingly.
 - **v0.8.12-user-storage-events**: Added JSON-based serializer for user storage provider cluster events to keep federation sync schedules consistent across Valkey-backed clusters, capturing component configuration so storage providers can be rehydrated without Protostream, and extended codec tests.
 - **v0.8.11-cluster-metrics**: Added Micrometer-backed metrics facade, instrumented cluster and DB lock providers, introduced Valkey work-completion events to unblock async execution, documented pub/sub configuration, and published the component diagram.
