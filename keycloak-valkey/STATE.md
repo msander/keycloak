@@ -126,7 +126,8 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 5. **Resilience & Observability**
    - Integrate circuit breaking and retry semantics using Lettuce `RetryPolicy`; expose metrics via Keycloak's Micrometer integration (if available) or custom SPI events.
    - Implement reconnect/backoff handling and validation for misconfiguration.
-   - Provide admin events or log warnings when backend latency or error thresholds exceeded.
+ - Provide admin events or log warnings when backend latency or error thresholds exceeded.
+  - Keep developer tooling aligned by ensuring orchestration scripts detect container termination even after Docker stops them.
 
 6. **Testing Strategy**
    - Unit tests covering serialization, key composition, and SPI wiring using mocks.
@@ -157,6 +158,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - [x] Provide Valkey-backed workflow state provider with sorted-set indexes for scheduling and deterministic tests.
 - [x] Derive reusable metrics facade (Micrometer integration) for downstream providers.
 - [x] Evaluate adaptive lock lease tuning and observability for the DB lock provider (latency metrics, failure alarms).
+- [x] Harden the Valkey dev stack monitor so exited Keycloak containers trigger automated shutdown.
 
 ## Developer Tooling
 - `.devcontainer/devcontainer.json` provisions a Java 21 + Maven workspace with Docker-in-Docker support and automatically packages the Valkey module for local testing workflows.
@@ -169,6 +171,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Evaluate deterministic seed data and concurrency scenarios to ensure session consistency during failover.
 
 ## Change Log
+- **v0.8.26-monitoring-fix**: Updated the development stack monitor to track containers after they stop so node exits reliably trigger stack shutdown.
 - **v0.8.25-sequential-bootstrap**: Hardened the development stack helper to launch Keycloak nodes sequentially, add readiness probing, and tear down the stack automatically if either node exits.
 - **v0.8.19-devstack-foreground**: Updated the development Docker stack helper to run in the foreground and automatically tear down the stack when a Keycloak node exits with an error.
 - **v0.8.22-cluster-resolution**: Resolved public key cache/storage listeners through the Valkey cluster provider and retained graceful degradation only when clustering is disabled, supporting Keycloak clusters that rely on Valkey instead of Infinispan.

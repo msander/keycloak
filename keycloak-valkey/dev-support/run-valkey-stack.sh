@@ -218,7 +218,7 @@ monitor_keycloak_services() {
     while true; do
         for service in "$@"; do
             local container_id
-            container_id=$("${COMPOSE_CMD[@]}" ps -q "${service}" 2>/dev/null || true)
+            container_id=$("${COMPOSE_CMD[@]}" ps -aq "${service}" 2>/dev/null || true)
             [[ -z "${container_id}" ]] && continue
 
             local state
