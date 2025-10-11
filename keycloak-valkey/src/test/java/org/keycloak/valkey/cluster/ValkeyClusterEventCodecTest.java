@@ -13,6 +13,11 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.keycloak.cluster.ClusterEvent;
 import org.keycloak.cluster.ClusterProvider;
+import org.keycloak.component.ComponentModel;
+import org.keycloak.common.util.MultivaluedHashMap;
+import org.keycloak.storage.UserStorageProvider;
+import org.keycloak.storage.UserStorageProviderModel;
+import org.keycloak.storage.managers.UserStorageSyncManager.UserStorageProviderClusterEvent;
 
 class ValkeyClusterEventCodecTest {
 
@@ -57,6 +62,25 @@ class ValkeyClusterEventCodecTest {
     }
 
     @Test
+    void shouldSerializeUserStorageClusterEvents() {
+        UserStorageProviderModel provider = sampleUserStorageProvider();
+        UserStorageProviderClusterEvent event = UserStorageProviderClusterEvent.createEvent(false, "realm-1", provider);
+
+        byte[] payload = codec.encode("user-storage", List.of(event), true, ClusterProvider.DCNotify.ALL_DCS, "node-1", "site-a");
+        ValkeyClusterEventCodec.DecodedMessage decoded = codec.decode(payload);
+
+        assertEquals(1, decoded.events().size());
+        Object decodedEventObject = decoded.events().iterator().next();
+        assertTrue(decodedEventObject instanceof UserStorageProviderClusterEvent);
+        UserStorageProviderClusterEvent decodedEvent = (UserStorageProviderClusterEvent) decodedEventObject;
+        assertEquals(event.isRemoved(), decodedEvent.isRemoved());
+        assertEquals(event.getRealmId(), decodedEvent.getRealmId());
+        assertEquals(provider.getId(), decodedEvent.getStorageProvider().getId());
+        assertEquals(provider.getProviderId(), decodedEvent.getStorageProvider().getProviderId());
+        assertEquals(provider.getConfig(), decodedEvent.getStorageProvider().getConfig());
+    }
+
+    @Test
     void shouldDefaultUnknownSiteFilterToAll() throws Exception {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (DataOutputStream out = new DataOutputStream(baos)) {
@@ -83,5 +107,19 @@ class ValkeyClusterEventCodecTest {
         byte[] bytes = value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         out.writeInt(bytes.length);
         out.write(bytes);
+    }
+
+    private UserStorageProviderModel sampleUserStorageProvider() {
+        ComponentModel component = new ComponentModel();
+        component.setId("provider-1");
+        component.setName("ldap-provider");
+        component.setProviderId("ldap");
+        component.setProviderType(UserStorageProvider.class.getName());
+        component.setConfig(new MultivaluedHashMap<>());
+        component.getConfig().putSingle(UserStorageProviderModel.IMPORT_ENABLED, Boolean.TRUE.toString());
+        component.getConfig().putSingle(UserStorageProviderModel.FULL_SYNC_PERIOD, "60");
+        component.getConfig().putSingle(UserStorageProviderModel.CHANGED_SYNC_PERIOD, "120");
+
+        return new UserStorageProviderModel(component);
     }
 }

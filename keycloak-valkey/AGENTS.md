@@ -7,6 +7,7 @@ These guidelines apply to every file inside the `keycloak-valkey` directory and 
 - Treat this module as a self-contained Keycloak extension that must build as part of the main Maven reactor and produce deployable JAR artifacts.
 - Maintain the planning state machine in `STATE.md`. Always update the plan, TODO list, and changelog whenever work is performed in this module.
 - Prefer using Keycloak Service Provider Interfaces (SPIs) or public extension points; avoid modifying upstream Keycloak modules unless strictly necessary and explicitly approved.
+- Work must remain self-contained within the `keycloak-valkey` module. Do not create, modify, or delete files outside this directory tree; if a feature would require upstream edits, surface the limitation instead of changing other modules.
 - Structure code for maintainability, resilience, and performance. Favour clear separation between API contracts, implementation logic, and test utilities.
 
 ## Code Style
