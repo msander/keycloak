@@ -13,7 +13,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Cluster event codec now serializes user storage sync notifications so periodic federation jobs stay aligned across nodes without Protostream, capturing the component model metadata required to rebuild `UserStorageProviderModel` instances on the receiving side.
 - DB lock provider integrates the global database lock SPI with Valkey, supporting forced unlock semantics and configurable retry/lease controls. Micrometer instrumentation captures acquisition latency, hold durations, and release failures for operational visibility.
 - Governance rules now explicitly confine development to the `keycloak-valkey/` module; proposed features that require edits elsewhere must be re-scoped or deferred.
-- Datastore provider factory now subclasses the default store managers to prefer Valkey-backed providers, maintains migration compatibility, and validates prerequisite Valkey infrastructure.
+- Datastore provider factory now subclasses the default store managers to prefer Valkey-backed providers, maintains migration compatibility, advertises a positive factory order so it is selected when present, and validates prerequisite Valkey infrastructure.
 - Single-use object provider backed by Valkey stores distributed action tokens with atomic removal semantics and optional revoked-token persistence.
 - User login failure provider persists brute-force counters in Valkey hashes with monotonic updates and TTL enforcement aligned with realm policies.
 - Authentication session provider stores root sessions and per-tab authentication state in Valkey hashes with optimistic updates and TTL derived from realm lifespans.
@@ -139,6 +139,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 
 ## TODO Backlog
 - [x] Add `keycloak-valkey` Maven module with initial `pom.xml` and placeholder source set to ensure compilation.
+- [x] Ensure the datastore provider factory publishes a positive SPI order so default selection logic remains valid when the extension is installed alongside legacy providers.
 - [x] Define dependency management for Lettuce/Valkey client and embedded test server in the module POM.
 - [x] Draft high-level component diagram illustrating provider replacements.
 - [x] Prototype embedded Redis server bootstrapping utility for tests (no Docker/Testcontainers).
@@ -167,6 +168,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 
 ## Change Log
 - **v0.8.19-devstack-foreground**: Updated the development Docker stack helper to run in the foreground and automatically tear down the stack when a Keycloak node exits with an error.
+- **v0.8.20-datastore-priority**: Ensured the Valkey datastore provider exposes a positive SPI order so Keycloak selects it as the default when the extension is installed, avoiding null datastore providers at runtime and covering the behaviour with a unit test.
 - **v0.8.14-build-flexibility**: Added a standalone POM and CI workflow so the extension can package against arbitrary upstream Keycloak releases while default builds continue to use the repository parent.
 - **v0.8.15-devtooling**: Added devcontainer configuration plus Docker Compose tooling for spinning up Valkey with two Keycloak nodes sharing a Postgres database and Valkey-backed providers without Infinispan clustering.
 - **v0.8.17-datastore-compat**: Updated the Valkey datastore provider to extend the default Keycloak datastore for migration compatibility while still preferring Valkey-backed SPI implementations and refreshed the associated tests.

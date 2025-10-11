@@ -81,4 +81,9 @@ class ValkeyDatastoreProviderFactoryTest {
     void exposesValkeyProviderId() {
         assertEquals(ValkeyDatastoreProviderFactory.PROVIDER_ID, factory.getId());
     }
+
+    @Test
+    void orderElevatesValkeyAsDefaultCandidate() {
+        assertTrue(factory.order() > 0, "Valkey datastore must advertise a positive order");
+    }
 }
