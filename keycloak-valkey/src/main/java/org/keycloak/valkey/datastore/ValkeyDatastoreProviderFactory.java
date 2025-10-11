@@ -6,7 +6,6 @@ import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.dblock.DBLockProvider;
 import org.keycloak.provider.ProviderFactory;
 import org.keycloak.storage.DatastoreProvider;
-import org.keycloak.storage.datastore.DefaultDatastoreProvider;
 import org.keycloak.storage.datastore.DefaultDatastoreProviderFactory;
 import org.keycloak.valkey.ValkeyConnectionProvider;
 import org.keycloak.valkey.cluster.ValkeyClusterProviderFactory;
@@ -22,11 +21,7 @@ public class ValkeyDatastoreProviderFactory extends DefaultDatastoreProviderFact
     @Override
     public DatastoreProvider create(KeycloakSession session) {
         ensureValkeyInfrastructure(session);
-        DatastoreProvider delegate = super.create(session);
-        if (!(delegate instanceof DefaultDatastoreProvider defaultProvider)) {
-            throw new IllegalStateException("Unexpected datastore delegate type: " + delegate.getClass().getName());
-        }
-        return new ValkeyDatastoreProvider(defaultProvider, session);
+        return new ValkeyDatastoreProvider(this, session);
     }
 
     private void ensureValkeyInfrastructure(KeycloakSession session) {
