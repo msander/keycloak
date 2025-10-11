@@ -1,0 +1,32 @@
+{
+    "name": "Keycloak Valkey Dev",
+    "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+    "features": {
+        "ghcr.io/devcontainers/features/java:1": {
+            "version": "21",
+            "installMaven": "true"
+        },
+        "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+        "ghcr.io/devcontainers/features/node:1": {
+            "version": "20"
+        }
+    },
+    "workspaceFolder": "/workspaces",
+    "workspaceMount": "source=${localWorkspaceFolder}/..,target=/workspaces,type=bind",
+    "postCreateCommand": "bash -lc 'set -euo pipefail; cd /workspaces; repo=$(find . -maxdepth 1 -type d ! -name . | while read d; do if [ -d \"$d/keycloak-valkey\" ]; then echo $d; break; fi; done); repo=${repo#./}; if [ -z \"$repo\" ]; then echo \"Unable to locate keycloak repository root\" >&2; exit 1; fi; cd \"$repo\" && mvn -pl keycloak-valkey -am -DskipTests package'",
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "java.configuration.checkProjectSettingsExclusions": false,
+                "java.configuration.updateBuildConfiguration": "automatic"
+            },
+            "extensions": [
+                "vscjava.vscode-java-pack",
+                "redhat.java",
+                "editorconfig.editorconfig",
+                "ms-azuretools.vscode-docker"
+            ]
+        }
+    },
+    "remoteUser": "vscode"
+}
