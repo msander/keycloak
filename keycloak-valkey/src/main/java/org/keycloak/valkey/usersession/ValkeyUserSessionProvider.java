@@ -472,6 +472,10 @@ final class ValkeyUserSessionProvider implements UserSessionProvider {
         });
     }
 
+    void refreshUserSessionTtl(RealmModel realm, String id, boolean offline, long refreshMillis) {
+        store.touch(realm, id, offline, refreshMillis);
+    }
+
     private ValkeyUserSessionAdapter toAdapter(RealmModel realm, String sessionId, boolean offline) {
         if (realm == null || sessionId == null) {
             return null;

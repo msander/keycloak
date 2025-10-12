@@ -20,6 +20,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - User login failure provider persists brute-force counters in Valkey hashes with monotonic updates and TTL enforcement aligned with realm policies.
 - Authentication session provider stores root sessions and per-tab authentication state in Valkey hashes with optimistic updates and TTL derived from realm lifespans.
 - User session provider persists online and offline user sessions together with client sessions in Valkey hashes, enforcing realm lifespans/idle timeouts via TTL and optimistic transactions.
+- User session provider now refreshes Valkey TTLs when clock-skewed or same-second refreshes report the same or older `lastSessionRefresh`, preventing premature logouts in multi-node clusters and covered by regression tests for skewed and unchanged timestamps.
 - User session persister stores durable online and offline sessions plus client session metadata in Valkey with query indexes for counts, pagination, and expiry management.
 - Public key cache now uses a Valkey-aware storage provider with cluster invalidation events, local cache clearing hooks, and Valkey-native event serializers that avoid Protostream dependencies.
 - Public key storage and cache factories now resolve the Valkey-backed cluster provider and only skip listener registration when it is truly unavailable, keeping Valkey-based clusters functional without Infinispan.
@@ -53,6 +54,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
    - Define serialization strategy using JSON or Valkey-native serializer SPIs stored in Redis hashes, with TTL handling for ephemeral entries.
    - Implement consistent key scheme with domain-specific prefixes (`user-session:realm:sessionId` etc.) and encode value payloads using Keycloak's existing serialization utilities when available.
    - Handle cross-data center replication by supporting Redis Cluster or Valkey multi-master setups; include configuration toggles for enabling read replicas.
+   - Harden TTL refresh semantics for skewed nodes and back the behaviour with regression tests that directly inspect Valkey TTL values.
 
 ## Component Diagram
 
@@ -161,6 +163,7 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - [x] Evaluate adaptive lock lease tuning and observability for the DB lock provider (latency metrics, failure alarms).
 - [ ] Add Valkey serializer coverage for `AuthenticationSessionAuthNoteUpdateEvent` once the SPI alignment is understood and expand codec tests accordingly.
 - [ ] Create integration-style tests exercising serializer paths with map/set fields (e.g., client removal, user full invalidation, permission ticket updates) to catch cross-module regressions.
+- [ ] Extend TTL refresh regression coverage to offline session import/export scenarios to ensure skew handling stays consistent.
 
 ## Developer Tooling
 - `.devcontainer/devcontainer.json` provisions a Java 21 + Maven workspace with Docker-in-Docker support and automatically packages the Valkey module for local testing workflows.
@@ -174,6 +177,9 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 
 ## Change Log
 - **v0.8.27-health-probes-port**: Exposed the management health endpoints on host ports 9000/9001 and updated the readiness helper to probe the correct management interface URLs so the dev stack no longer hangs waiting for Keycloak.
+- **v0.8.30-session-ttl-millis-tracking**: Track millisecond refresh instants for Valkey-backed user sessions so TTL refreshes extend even when the reported timestamp is unchanged, and cover the behaviour with a same-second regression test.
+- **v0.8.29-session-ttl-verification**: Strengthened the clock-skew regression test by asserting the Valkey TTL increase and confirming post-refresh headroom so future changes cannot silently drop the idle-extension behaviour.
+- **v0.8.28-session-ttl-refresh**: Ensure user session TTLs are refreshed when nodes report non-increasing `lastSessionRefresh` values so skewed clocks no longer cause near-immediate logouts, and added a targeted unit test reproducing the issue with dual providers and negative offsets.
 - **v0.8.26-health-probes**: Enabled Keycloak's health endpoints in the development Docker stack and removed the deprecated Compose `version` declaration so readiness checks succeed without manual intervention.
 - **v0.8.25-sequential-bootstrap**: Hardened the development stack helper to launch Keycloak nodes sequentially, add readiness probing, and tear down the stack automatically if either node exits.
 - **v0.8.19-devstack-foreground**: Updated the development Docker stack helper to run in the foreground and automatically tear down the stack when a Keycloak node exits with an error.
