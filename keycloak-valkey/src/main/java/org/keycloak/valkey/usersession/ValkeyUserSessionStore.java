@@ -90,6 +90,34 @@ final class ValkeyUserSessionStore {
         throw new IllegalStateException("Failed to update user session after " + MAX_UPDATE_ATTEMPTS + " attempts");
     }
 
+    void touch(RealmModel realm, String id, boolean offline, long refreshMillis) {
+        Objects.requireNonNull(realm, "realm");
+        Objects.requireNonNull(id, "id");
+        String key = key(offline, realm.getId(), id);
+        for (int attempt = 0; attempt < MAX_UPDATE_ATTEMPTS; attempt++) {
+            commands.watch(key);
+            ValkeyUserSessionEntity current = load(realm.getId(), id, offline).orElse(null);
+            if (current == null) {
+                commands.unwatch();
+                return;
+            }
+            long now = Time.currentTimeMillis();
+            long effectiveRefresh = refreshMillis > 0 ? Math.max(refreshMillis, now) : now;
+            if (effectiveRefresh > current.getLastSessionRefreshMillis()) {
+                current.setLastSessionRefreshMillis(effectiveRefresh);
+            } else {
+                current.setLastSessionRefreshMillis(Math.max(current.getLastSessionRefreshMillis(), now));
+            }
+            commands.multi();
+            persistWithinTransaction(realm, key, current);
+            TransactionResult result = commands.exec();
+            if (result != null) {
+                return;
+            }
+        }
+        throw new IllegalStateException("Failed to refresh user session TTL after " + MAX_UPDATE_ATTEMPTS + " attempts");
+    }
+
     void delete(String realmId, String id, boolean offline) {
         commands.del(key(offline, realmId, id));
     }
@@ -167,7 +195,11 @@ final class ValkeyUserSessionStore {
     private int computeTtlSeconds(RealmModel realm, ValkeyUserSessionEntity entity) {
         long nowMillis = Time.currentTimeMillis();
         long createdMillis = entity.getStarted() * 1000L;
-        long idleMillis = entity.getLastSessionRefresh() * 1000L;
+        long lastRefreshMillis = entity.getLastSessionRefreshMillis();
+        if (lastRefreshMillis <= 0) {
+            lastRefreshMillis = entity.getLastSessionRefresh() * 1000L;
+        }
+        long idleMillis = Math.max(lastRefreshMillis, entity.getLastSessionRefresh() * 1000L);
         boolean offline = entity.isOffline();
         long lifespan = SessionExpirationUtils.calculateUserSessionMaxLifespanTimestamp(offline, entity.isRememberMe(),
                 createdMillis, realm);

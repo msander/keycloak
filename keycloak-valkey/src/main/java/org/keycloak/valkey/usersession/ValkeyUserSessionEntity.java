@@ -27,6 +27,7 @@ final class ValkeyUserSessionEntity {
     private boolean rememberMe;
     private int started;
     private int lastSessionRefresh;
+    private long lastSessionRefreshMillis;
     private UserSessionModel.State state;
     private String brokerSessionId;
     private String brokerUserId;
@@ -53,6 +54,7 @@ final class ValkeyUserSessionEntity {
         entity.rememberMe = rememberMe;
         entity.started = Time.currentTime();
         entity.lastSessionRefresh = entity.started;
+        entity.lastSessionRefreshMillis = Time.currentTimeMillis();
         entity.state = UserSessionModel.State.LOGGED_IN;
         entity.brokerSessionId = brokerSessionId;
         entity.brokerUserId = brokerUserId;
@@ -72,6 +74,7 @@ final class ValkeyUserSessionEntity {
         entity.rememberMe = model.isRememberMe();
         entity.started = model.getStarted();
         entity.lastSessionRefresh = model.getLastSessionRefresh();
+        entity.lastSessionRefreshMillis = Math.max(0, (long) model.getLastSessionRefresh() * 1000);
         entity.state = model.getState();
         entity.brokerSessionId = model.getBrokerSessionId();
         entity.brokerUserId = model.getBrokerUserId();
@@ -93,6 +96,7 @@ final class ValkeyUserSessionEntity {
         copy.rememberMe = rememberMe;
         copy.started = started;
         copy.lastSessionRefresh = lastSessionRefresh;
+        copy.lastSessionRefreshMillis = lastSessionRefreshMillis;
         copy.state = state;
         copy.brokerSessionId = brokerSessionId;
         copy.brokerUserId = brokerUserId;
@@ -174,6 +178,14 @@ final class ValkeyUserSessionEntity {
 
     public void setLastSessionRefresh(int lastSessionRefresh) {
         this.lastSessionRefresh = lastSessionRefresh;
+    }
+
+    public long getLastSessionRefreshMillis() {
+        return lastSessionRefreshMillis;
+    }
+
+    public void setLastSessionRefreshMillis(long lastSessionRefreshMillis) {
+        this.lastSessionRefreshMillis = lastSessionRefreshMillis;
     }
 
     public UserSessionModel.State getState() {

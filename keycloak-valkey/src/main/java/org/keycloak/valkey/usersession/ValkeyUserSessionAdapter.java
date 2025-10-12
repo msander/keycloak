@@ -91,10 +91,14 @@ final class ValkeyUserSessionAdapter implements UserSessionModel {
     @Override
     public void setLastSessionRefresh(int seconds) {
         if (seconds <= entity.getLastSessionRefresh()) {
+            provider.refreshUserSessionTtl(realm, entity.getId(), offline, Time.currentTimeMillis());
             return;
         }
         mutate(sessionEntity -> {
             sessionEntity.setLastSessionRefresh(seconds);
+            long nowMillis = Time.currentTimeMillis();
+            long candidateMillis = Math.max(nowMillis, Math.max(sessionEntity.getLastSessionRefreshMillis(), seconds * 1000L));
+            sessionEntity.setLastSessionRefreshMillis(candidateMillis);
             return sessionEntity;
         });
     }
@@ -182,6 +186,7 @@ final class ValkeyUserSessionAdapter implements UserSessionModel {
             int now = Time.currentTime();
             entity.setStarted(now);
             entity.setLastSessionRefresh(now);
+            entity.setLastSessionRefreshMillis(Time.currentTimeMillis());
             entity.setState(State.LOGGED_IN);
             entity.getNotes().clear();
             entity.getClientSessions().clear();
