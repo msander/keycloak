@@ -18,6 +18,7 @@ final class ValkeyAuthenticatedClientSessionAdapter implements AuthenticatedClie
     private final UserSessionModel userSession;
     private final boolean offline;
     private final String clientId;
+    private final String id;
 
     private ValkeyAuthenticatedClientSessionEntity entity;
 
@@ -29,6 +30,7 @@ final class ValkeyAuthenticatedClientSessionAdapter implements AuthenticatedClie
         this.userSession = Objects.requireNonNull(userSession, "userSession");
         this.offline = offline;
         this.clientId = client.getId();
+        this.id = entity.getUserSessionId() + "::" + this.clientId;
         this.entity = Objects.requireNonNull(entity, "entity");
     }
 
@@ -57,7 +59,7 @@ final class ValkeyAuthenticatedClientSessionAdapter implements AuthenticatedClie
 
     @Override
     public String getId() {
-        return clientId;
+        return id;
     }
 
     @Override

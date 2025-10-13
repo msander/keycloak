@@ -175,4 +175,19 @@ class ValkeyUserSessionProviderTest {
         provider.removeUserSessions(realm);
         assertNull(provider.getUserSession(realm, sessionModel.getId()));
     }
+
+    @Test
+    void shouldExposeStableClientSessionId() {
+        UserSessionModel sessionModel = provider.createUserSession(null, realm, user, "alice", "127.0.0.1", "form",
+                false, null, null, UserSessionModel.SessionPersistenceState.PERSISTENT);
+
+        AuthenticatedClientSessionModel clientSession = provider.createClientSession(realm, client, sessionModel);
+
+        String expectedId = sessionModel.getId() + "::" + client.getId();
+        assertEquals(expectedId, clientSession.getId());
+
+        AuthenticatedClientSessionModel reloaded = provider.getClientSession(sessionModel, client, false);
+        assertNotNull(reloaded);
+        assertEquals(expectedId, reloaded.getId());
+    }
 }

@@ -173,6 +173,9 @@ Replace the default Infinispan-based clustering layers in Keycloak with a Redis/
 - Evaluate deterministic seed data and concurrency scenarios to ensure session consistency during failover.
 
 ## Change Log
+- **v0.8.28-stable-client-session-ids**: Fixed the Valkey authenticated client session adapter to expose the same composite
+  identifier format as the default Keycloak implementations and added regression tests that guard refresh token reuse metadata
+  across cluster nodes.
 - **v0.8.27-health-probes-port**: Exposed the management health endpoints on host ports 9000/9001 and updated the readiness helper to probe the correct management interface URLs so the dev stack no longer hangs waiting for Keycloak.
 - **v0.8.26-health-probes**: Enabled Keycloak's health endpoints in the development Docker stack and removed the deprecated Compose `version` declaration so readiness checks succeed without manual intervention.
 - **v0.8.25-sequential-bootstrap**: Hardened the development stack helper to launch Keycloak nodes sequentially, add readiness probing, and tear down the stack automatically if either node exits.
