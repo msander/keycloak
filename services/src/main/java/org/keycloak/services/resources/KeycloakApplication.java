@@ -17,6 +17,7 @@
 package org.keycloak.services.resources;
 
 import java.io.File;
+import java.sql.SQLException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -112,7 +113,7 @@ public abstract class KeycloakApplication extends Application {
             }
         }
 
-        KeycloakApplication.sessionFactory = createSessionFactory();
+        KeycloakApplication.sessionFactory = createSessionFactory(supportsAsyncInitialization());
         setTransactionTimeout();
         var exportImportManager = KeycloakModelUtils.runJobInTransactionWithResult(sessionFactory, session -> {
             DBLockManager dbLockManager = new DBLockManager(session);
@@ -178,6 +179,45 @@ public abstract class KeycloakApplication extends Application {
     protected abstract void initAndStart();
 
     protected abstract KeycloakSessionFactory createSessionFactory();
+
+    private KeycloakSessionFactory createSessionFactory(boolean retryOnTargetServerTypeRejection) {
+        while (true) {
+            try {
+                return createSessionFactory();
+            } catch (Exception e) {
+                if (!retryOnTargetServerTypeRejection || !isTargetServerTypeRejection(e)) {
+                    throw e;
+                }
+                logger.warnf("Database is not accepting connections as primary, waiting for promotion: %s",
+                        getRootCauseMessage(e));
+                try {
+                    Thread.sleep(TimeUnit.SECONDS.toMillis(5));
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while waiting for a primary database", ie);
+                }
+            }
+        }
+    }
+
+    public static boolean isTargetServerTypeRejection(Throwable e) {
+        while (e != null) {
+            if (e instanceof SQLException && e.getMessage() != null
+                    && e.getMessage().contains("Could not find a server with specified targetServerType")) {
+                return true;
+            }
+            e = e.getCause();
+        }
+        return false;
+    }
+
+    private static String getRootCauseMessage(Throwable e) {
+        Throwable root = e;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        return root.getMessage();
+    }
 
     public static KeycloakSessionFactory getSessionFactory() {
         return sessionFactory;
