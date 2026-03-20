@@ -19,6 +19,7 @@ package org.keycloak.quarkus.runtime.services.health;
 
 import jakarta.enterprise.context.ApplicationScoped;
 
+import org.keycloak.common.Profile;
 import org.keycloak.services.resources.KeycloakApplication;
 
 import io.smallrye.health.api.AsyncHealthCheck;
@@ -29,12 +30,17 @@ import org.eclipse.microprofile.health.Readiness;
 
 /**
  * Readiness health check that reports DOWN while the server bootstrap is in progress and UP once initialization completes.
+ * <p>
+ * When the {@code WARM_STANDBY} feature is enabled, this check always reports UP so that
+ * Kubernetes rolling updates can proceed even while the pod waits for the database to
+ * become primary. Traffic routing is controlled separately via a load-balancer health check.
  */
 @Readiness
 @ApplicationScoped
 public class BoostrapReadyHealthCheck implements AsyncHealthCheck {
 
     private static final HealthCheckResponse UP = builder().up().build();
+    private final boolean warmStandby = Profile.isFeatureEnabled(Profile.Feature.WARM_STANDBY);
     private boolean bootstrapCompleted;
 
     @Override
@@ -46,7 +52,10 @@ public class BoostrapReadyHealthCheck implements AsyncHealthCheck {
         if (KeycloakApplication.isBootstrapCompleted()) {
             bootstrapCompleted = true;
             return ready();
-        } 
+        }
+        if (warmStandby) {
+            return ready();
+        }
         return Uni.createFrom().item(builder().down().build());
     }
 

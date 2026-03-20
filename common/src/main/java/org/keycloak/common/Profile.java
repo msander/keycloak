@@ -170,7 +170,9 @@ public class Profile {
 
         SCIM_API("Exposes a SCIM API for managing realm resources on a per-realm basis", Type.EXPERIMENTAL),
 
-        RESOURCE_INDICATORS("Resource Indicators for OAuth 2.0", Type.EXPERIMENTAL);
+        RESOURCE_INDICATORS("Resource Indicators for OAuth 2.0", Type.EXPERIMENTAL),
+
+        WARM_STANDBY("Warm-standby support for database failover scenarios", Type.EXPERIMENTAL);
 
         private final Type type;
         private final String label;

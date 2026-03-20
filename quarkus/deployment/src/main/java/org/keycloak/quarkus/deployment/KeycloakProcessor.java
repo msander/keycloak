@@ -97,7 +97,9 @@ import org.keycloak.quarkus.runtime.integration.resteasy.KeycloakHandlerChainCus
 import org.keycloak.quarkus.runtime.integration.resteasy.KeycloakTracingCustomizer;
 import org.keycloak.quarkus.runtime.logging.ClearMappedDiagnosticContextFilter;
 import org.keycloak.quarkus.runtime.services.health.BoostrapReadyHealthCheck;
+import org.keycloak.quarkus.runtime.services.health.KeycloakActiveHealthCheck;
 import org.keycloak.quarkus.runtime.services.health.KeycloakClusterReadyHealthCheck;
+import org.keycloak.quarkus.runtime.services.health.KeycloakDatabasePrimaryLivenessCheck;
 import org.keycloak.quarkus.runtime.services.health.KeycloakReadyHealthCheck;
 import org.keycloak.quarkus.runtime.storage.database.jpa.NamedJpaConnectionProviderFactory;
 import org.keycloak.quarkus.runtime.themes.FlatClasspathThemeResourceProviderFactory;
@@ -850,6 +852,9 @@ class KeycloakProcessor {
             // no cluster when the remote infinispan is used.
             disableClusterHealthCheck(removeBeans, index);
         }
+        if (!Profile.isFeatureEnabled(Profile.Feature.WARM_STANDBY)) {
+            disableWarmStandbyHealthChecks(removeBeans, index);
+        }
     }
 
     private static void disableClusterHealthCheck(BuildProducer<BuildTimeConditionBuildItem> removeBeans, CombinedIndexBuildItem index) {
@@ -865,6 +870,13 @@ class KeycloakProcessor {
     private static void disableBootstrapReadyHealthCheck(BuildProducer<BuildTimeConditionBuildItem> removeBeans, CombinedIndexBuildItem index) {
         ClassInfo disabledBean = index.getIndex().getClassByName(DotName.createSimple(BoostrapReadyHealthCheck.class.getName()));
         removeBeans.produce(new BuildTimeConditionBuildItem(disabledBean.asClass(), false));
+    }
+
+    private static void disableWarmStandbyHealthChecks(BuildProducer<BuildTimeConditionBuildItem> removeBeans, CombinedIndexBuildItem index) {
+        ClassInfo livenessCheck = index.getIndex().getClassByName(DotName.createSimple(KeycloakDatabasePrimaryLivenessCheck.class.getName()));
+        removeBeans.produce(new BuildTimeConditionBuildItem(livenessCheck.asClass(), false));
+        ClassInfo activeCheck = index.getIndex().getClassByName(DotName.createSimple(KeycloakActiveHealthCheck.class.getName()));
+        removeBeans.produce(new BuildTimeConditionBuildItem(activeCheck.asClass(), false));
     }
 
     @BuildStep

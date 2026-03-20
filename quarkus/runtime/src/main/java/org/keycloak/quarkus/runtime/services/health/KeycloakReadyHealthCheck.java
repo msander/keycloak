@@ -25,6 +25,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import org.keycloak.common.Profile;
+import org.keycloak.services.resources.KeycloakApplication;
+
 import io.agroal.api.AgroalDataSource;
 import io.agroal.api.AgroalDataSourceMetrics;
 import io.quarkus.agroal.runtime.health.DataSourceHealthCheck;
@@ -66,10 +69,15 @@ public class KeycloakReadyHealthCheck implements AsyncHealthCheck {
     @Inject
     DataSourceHealthCheck dataSourceHealthCheck;
 
+    private final boolean warmStandby = Profile.isFeatureEnabled(Profile.Feature.WARM_STANDBY);
     private final AtomicReference<Instant> failingSince = new AtomicReference<>();
 
     @Override
     public Uni<HealthCheckResponse> call() {
+        if (warmStandby && !KeycloakApplication.isBootstrapCompleted()) {
+            return healthCheckFactory.callAsync(() -> Uni.createFrom()
+                    .item(HealthCheckResponse.named("Keycloak database connections async health check").up().build()));
+        }
         HealthCheckResponseBuilder builder = HealthCheckResponse.named("Keycloak database connections async health check").up();
         AgroalDataSourceMetrics metrics = agroalDataSource.getMetrics();
         long activeCount = metrics.activeCount();

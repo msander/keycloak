@@ -17,6 +17,7 @@
 package org.keycloak.services.resources;
 
 import java.io.File;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
@@ -86,21 +87,38 @@ public abstract class KeycloakApplication<KSF extends KeycloakSessionFactory> ex
     protected void startup() {
         Profile.getInstance().logUnsupportedFeatures();
         CryptoIntegration.init(KeycloakApplication.class.getClassLoader());
+
+        if (supportsAsyncInitialization() && Profile.isFeatureEnabled(Profile.Feature.WARM_STANDBY)) {
+            // Warm-standby: defer everything to the background thread so that
+            // the HTTP server starts immediately and health endpoints are reachable
+            // while waiting for the database to become primary.
+            startAsync(() -> waitForPrimaryDatabase(() -> {
+                KSF ksf = createSessionFactory();
+                sessionFactory = ksf;
+                runBootstrap(ksf);
+            }));
+            return;
+        }
+
         var ksf = createSessionFactory();
         sessionFactory = ksf;
 
         if (supportsAsyncInitialization()) {
-            final var executor = Executors.newSingleThreadExecutor();
-            CompletableFuture.runAsync(() -> runBootstrap(ksf), executor)
-                    .exceptionally(throwable -> {
-                        exit(throwable);
-                        return null;
-                    })
-                    .thenRun(executor::shutdown);
+            startAsync(() -> runBootstrap(ksf));
             return;
         }
 
         runBootstrap(ksf);
+    }
+
+    private void startAsync(Runnable task) {
+        final var executor = Executors.newSingleThreadExecutor();
+        CompletableFuture.runAsync(task, executor)
+                .exceptionally(throwable -> {
+                    exit(throwable);
+                    return null;
+                })
+                .thenRun(executor::shutdown);
     }
 
     protected boolean supportsAsyncInitialization() {
@@ -179,6 +197,46 @@ public abstract class KeycloakApplication<KSF extends KeycloakSessionFactory> ex
     protected abstract KSF createSessionFactory();
 
     protected abstract void initKeycloakSessionFactory(KSF ksf);
+
+    private void waitForPrimaryDatabase(Runnable task) {
+        while (true) {
+            try {
+                task.run();
+                return;
+            } catch (Exception e) {
+                if (!isTargetServerTypeRejection(e)) {
+                    throw e;
+                }
+                logger.warnf("Database is not accepting connections as primary, waiting for promotion: %s",
+                        getRootCauseMessage(e));
+                try {
+                    Thread.sleep(TimeUnit.SECONDS.toMillis(5));
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while waiting for a primary database", ie);
+                }
+            }
+        }
+    }
+
+    public static boolean isTargetServerTypeRejection(Throwable e) {
+        while (e != null) {
+            if (e instanceof SQLException && e.getMessage() != null
+                    && e.getMessage().contains("Could not find a server with specified targetServerType")) {
+                return true;
+            }
+            e = e.getCause();
+        }
+        return false;
+    }
+
+    private static String getRootCauseMessage(Throwable e) {
+        Throwable root = e;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        return root.getMessage();
+    }
 
     public static KeycloakSessionFactory getSessionFactory() {
         return sessionFactory;
